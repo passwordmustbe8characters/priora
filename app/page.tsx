@@ -19,8 +19,12 @@ export default function Home() {
     >
       {/* Sticky at top:0, stays pinned as the panel below scrolls up over
           it — that's what makes the panel read as "covering" this section
-          rather than just following it down the page. */}
-      <section className="sticky top-0 flex h-screen flex-col items-center">
+          rather than just following it down the page. Shorter than a full
+          screen on mobile on purpose: at h-screen, a phone would show only
+          the headline on load, with the search field a scroll away and
+          invisible until you find it. This height lets the panel (and the
+          pill) peek in from the bottom of that first screen instead. */}
+      <section className="sticky top-0 flex h-[78vh] flex-col items-center sm:h-screen">
         <header className="flex w-full max-w-6xl items-center justify-between px-6 pt-8 sm:px-10">
           <Wordmark />
           <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "light" ? "dark" : "light")} />

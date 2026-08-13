@@ -9,7 +9,7 @@ const REVEAL = "Your execution is what matters";
  */
 export function Headline({ revealed }: { revealed: boolean }) {
   return (
-    <h1 className="font-display grid w-full text-center text-[clamp(3rem,9vw,8.5rem)] leading-[0.95] font-bold tracking-tight text-foreground">
+    <h1 className="font-display grid w-full text-center text-[clamp(4rem,9vw,8.5rem)] leading-[0.95] font-bold tracking-tight text-foreground">
       <span
         aria-hidden={revealed}
         className={`text-balance transition-all duration-500 ease-out [grid-area:1/1] ${
