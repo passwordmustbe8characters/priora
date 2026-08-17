@@ -19,28 +19,46 @@ function toPgTextArrayLiteral(values: string[]): string {
   return `{${escaped.join(",")}}`;
 }
 
+// Requiring only ONE shared tag (Postgres's && overlap operator) is too
+// loose in practice — generic tags like "marketplace" or "b2b" show up
+// across wildly unrelated businesses, so a single shared tag produced real
+// false-hits in testing (a ride-hailing idea matched cocoa-export
+// companies purely because both happened to be tagged "marketplace").
+// Requiring at least 2 shared tags is a cheap, meaningful precision bump.
+const MIN_SHARED_TAGS = 2;
+
 /**
- * Companies whose category tags overlap the given tags and whose data is
- * still inside the freshness window — candidates for a cache-hit match
- * pass instead of paying for a fresh live search.
+ * Companies sharing at least MIN_SHARED_TAGS category tags with the given
+ * ones, still inside the freshness window — candidates for a cache-hit
+ * match pass instead of paying for a fresh live search.
  *
  * One freshness clock per row (last_updated_at), not per column — see
  * docs/db-schema.md for why field-level staleness tracking is overkill
  * for this stage.
  */
 export async function findFreshCandidates(categoryTags: string[], limit = 10): Promise<Company[]> {
-  if (categoryTags.length === 0) return [];
+  if (categoryTags.length < MIN_SHARED_TAGS) return [];
   const db = getDb();
+  const tagsLiteral = toPgTextArrayLiteral(categoryTags);
   return db
     .select()
     .from(companies)
     .where(
       and(
-        sql`${companies.categoryTags} && ${toPgTextArrayLiteral(categoryTags)}::text[]`,
+        sql`(
+          SELECT count(*) FROM unnest(${companies.categoryTags}) AS tag
+          WHERE tag = ANY(${tagsLiteral}::text[])
+        ) >= ${MIN_SHARED_TAGS}`,
         gt(companies.lastUpdatedAt, ttlCutoff()),
       ),
     )
     .limit(limit);
+}
+
+export interface UpsertResult {
+  inserted: number;
+  failed: number;
+  errors: string[];
 }
 
 /**
@@ -48,22 +66,37 @@ export async function findFreshCandidates(categoryTags: string[], limit = 10): P
  * if a company with the same URL already exists. Rows without a URL are
  * always inserted fresh — the unique index only applies where url is set,
  * so there's nothing to conflict against for those.
+ *
+ * Returns a per-batch result instead of throwing on the first failure —
+ * one bad row (e.g. a duplicate name-only entry with no URL to key on)
+ * shouldn't sink the whole batch, and the caller needs to know what
+ * actually happened rather than trust a silent success.
  */
-export async function upsertCompanies(rows: NewCompany[]): Promise<void> {
-  if (rows.length === 0) return;
+export async function upsertCompanies(rows: NewCompany[]): Promise<UpsertResult> {
+  const result: UpsertResult = { inserted: 0, failed: 0, errors: [] };
+  if (rows.length === 0) return result;
+
   const db = getDb();
   for (const row of rows) {
-    if (row.url) {
-      await db
-        .insert(companies)
-        .values(row)
-        .onConflictDoUpdate({
-          target: companies.url,
-          targetWhere: sql`${companies.url} is not null`,
-          set: { ...row, lastUpdatedAt: new Date() },
-        });
-    } else {
-      await db.insert(companies).values(row);
+    try {
+      if (row.url) {
+        await db
+          .insert(companies)
+          .values(row)
+          .onConflictDoUpdate({
+            target: companies.url,
+            targetWhere: sql`${companies.url} is not null`,
+            set: { ...row, lastUpdatedAt: new Date() },
+          });
+      } else {
+        await db.insert(companies).values(row);
+      }
+      result.inserted++;
+    } catch (err) {
+      result.failed++;
+      const message = err instanceof Error ? err.message : String(err);
+      result.errors.push(`${row.name}: ${message}`);
     }
   }
+  return result;
 }

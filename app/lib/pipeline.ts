@@ -1,5 +1,5 @@
 import { getOpenAI, VERDICT_MODEL } from "./openai";
-import { findFreshCandidates, upsertCompanies } from "./db/companies";
+import { findFreshCandidates, upsertCompanies, type UpsertResult } from "./db/companies";
 import type { Company } from "./db/schema";
 import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
 
@@ -24,12 +24,12 @@ import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
  */
 
 const MIN_CACHE_CANDIDATES = 3;
-
-// TEMPORARY diagnostic: surfaces a swallowed cache-write error without
-// changing the response contract, so it can be read via a debug header
-// in production where console logs aren't reachable. Remove once the
-// current upsert issue is confirmed fixed.
-export let lastUpsertError: string | null = null;
+// Cache retrieval (findFreshCandidates) is a coarse tag-overlap filter,
+// not a relevance judgment — the model must score every candidate it's
+// handed, so a genuinely irrelevant one it correctly scores low would
+// otherwise still show up as a "match" just for surviving retrieval.
+// This is the actual relevance floor.
+const MIN_CACHED_MATCH_SCORE = 30;
 
 // ---------------------------------------------------------------------
 // Stage 1: Idea Normalizer
@@ -170,7 +170,7 @@ async function cachedMatch(
       source: c.source,
       matchScore: parsed.scores[i] ?? 0,
     }))
-    .filter((m) => m.matchScore > 0)
+    .filter((m) => m.matchScore >= MIN_CACHED_MATCH_SCORE)
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, 5)
     .map(sanitizeMatch);
@@ -299,7 +299,10 @@ async function liveSearchAndMatch(
 // Orchestrator
 // ---------------------------------------------------------------------
 
-export async function runVerdictPipeline(rawIdea: string): Promise<VerdictResponse> {
+export async function runVerdictPipeline(
+  rawIdea: string,
+  debug?: { cacheHit?: boolean; upsertResult?: UpsertResult },
+): Promise<VerdictResponse> {
   const normalized = await normalizeIdea(rawIdea);
 
   const cached = await findFreshCandidates(normalized.categoryTags, 10);
@@ -307,8 +310,10 @@ export async function runVerdictPipeline(rawIdea: string): Promise<VerdictRespon
   let result: { status: VerdictStatus; headline: string; confidence: number; matches: VerdictMatch[] };
 
   if (cached.length >= MIN_CACHE_CANDIDATES) {
+    if (debug) debug.cacheHit = true;
     result = await cachedMatch(normalized.normalizedIdea, cached);
   } else {
+    if (debug) debug.cacheHit = false;
     const live = await liveSearchAndMatch(normalized.normalizedIdea, normalized.categoryTags);
     result = live;
 
@@ -321,26 +326,26 @@ export async function runVerdictPipeline(rawIdea: string): Promise<VerdictRespon
     // Awaited, not fire-and-forget: a serverless function can freeze or
     // get torn down the instant its response is sent, so a detached
     // promise here risks the cache write never actually completing.
-    // Failure here shouldn't fail the request — the founder still gets
-    // their verdict even if caching this round didn't work.
-    try {
-      await upsertCompanies(
-        live.raw.map((m) => ({
-          name: m.name,
-          description: m.description,
-          url: m.url || null,
-          source: m.source,
-          region: m.region ?? "global",
-          country: m.country,
-          categoryTags: normalized.categoryTags,
-          pricing: m.pricing,
-          fundingStage: m.fundingStage,
-        })),
-      );
-    } catch (err) {
-      console.error("company cache upsert failed:", err);
-      lastUpsertError = err instanceof Error ? err.message : String(err);
+    // Reports back via `debug` rather than throwing — a cache-write
+    // failure shouldn't fail the request; the founder still gets their
+    // verdict even if caching this round didn't work.
+    const upsertResult = await upsertCompanies(
+      live.raw.map((m) => ({
+        name: m.name,
+        description: m.description,
+        url: m.url || null,
+        source: m.source,
+        region: m.region ?? "global",
+        country: m.country,
+        categoryTags: normalized.categoryTags,
+        pricing: m.pricing,
+        fundingStage: m.fundingStage,
+      })),
+    );
+    if (upsertResult.failed > 0) {
+      console.error("company cache upsert had failures:", upsertResult.errors);
     }
+    if (debug) debug.upsertResult = upsertResult;
   }
 
   return {

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
-import { runVerdictPipeline, lastUpsertError } from "../../lib/pipeline";
+import { runVerdictPipeline } from "../../lib/pipeline";
 import { getCachedVerdict, setCachedVerdict } from "../../lib/cache";
+import type { UpsertResult } from "../../lib/db/companies";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // web search + reasoning can take a while
@@ -38,10 +39,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await runVerdictPipeline(idea);
+    const debug: { cacheHit?: boolean; upsertResult?: UpsertResult } = {};
+    const result = await runVerdictPipeline(idea, debug);
     setCachedVerdict(idea, result);
-    const headers: Record<string, string> = { "X-Cache": "MISS" };
-    if (lastUpsertError) headers["X-Cache-Write-Error"] = lastUpsertError.slice(0, 200);
+    const headers: Record<string, string> = { "X-Cache": debug.cacheHit ? "COMPANY-DB-HIT" : "MISS" };
+    if (debug.upsertResult) {
+      headers["X-Cache-Write"] = `inserted=${debug.upsertResult.inserted} failed=${debug.upsertResult.failed}`;
+      if (debug.upsertResult.errors.length) {
+        headers["X-Cache-Write-Error"] = debug.upsertResult.errors[0].slice(0, 300);
+      }
+    }
     return Response.json(result, { headers });
   } catch (err) {
     console.error("verdict pipeline failed:", err);
