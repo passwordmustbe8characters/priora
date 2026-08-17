@@ -1,29 +1,24 @@
 "use client";
 
-import { useState, type RefObject } from "react";
+import { useState } from "react";
 import { submitIdea, VerdictError, type VerdictResponse } from "./verdict";
 
 export type Phase = "idle" | "active" | "loading" | "result" | "error";
 
 /**
- * Owns the whole search→verdict lifecycle so it can be shared between the
- * search pill and whatever needs to know its state (the headline shrinks
- * once a search starts). The input's value lives in the DOM (uncontrolled,
- * read via inputRef) rather than in React state — it's never cleared on a
- * successful search, so it stays visible/editable for a follow-up query,
- * and Enter re-submits from "result" or "error" just like from "active".
- *
- * inputRef is created by the caller and passed in, not created/returned
- * here — a hook returning an object that bundles a ref alongside plain
- * render state trips the react-hooks/refs lint rule, which (correctly
- * conservatively) can't prove property access on the combined object is
- * never a ref read. Keeping ref ownership in the component and state
- * ownership in the hook sidesteps that entirely.
+ * Owns the whole search→verdict lifecycle. `submit` takes the idea text
+ * directly as an argument rather than reading a shared input ref — there
+ * are now two separate inputs (the landing search bar, and the results
+ * panel's own editable field for a follow-up query), so the hook doesn't
+ * own or care which DOM node the text came from. `lastIdea` is exposed so
+ * whichever input renders next (e.g. the panel opening) can be
+ * pre-filled with what was actually submitted.
  */
-export function useVerdictFlow(inputRef: RefObject<HTMLInputElement | null>) {
+export function useVerdictFlow() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<VerdictResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastIdea, setLastIdea] = useState("");
 
   const activate = () => {
     if (phase === "idle") setPhase("active");
@@ -40,8 +35,9 @@ export function useVerdictFlow(inputRef: RefObject<HTMLInputElement | null>) {
     setErrorMessage(null);
   };
 
-  const submit = async () => {
-    const idea = inputRef.current?.value.trim() ?? "";
+  const submit = async (rawIdea: string) => {
+    const idea = rawIdea.trim();
+    setLastIdea(idea);
     if (idea.length < 10) {
       setErrorMessage("Tell us a bit more — ideas need to be at least 10 characters.");
       return;
@@ -65,9 +61,9 @@ export function useVerdictFlow(inputRef: RefObject<HTMLInputElement | null>) {
   const reset = () => {
     setResult(null);
     setErrorMessage(null);
+    setLastIdea("");
     setPhase("idle");
-    if (inputRef.current) inputRef.current.value = "";
   };
 
-  return { phase, result, errorMessage, activate, cancel, submit, reset, clearErrorOnEdit };
+  return { phase, result, errorMessage, lastIdea, activate, cancel, submit, reset, clearErrorOnEdit };
 }
