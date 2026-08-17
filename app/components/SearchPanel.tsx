@@ -46,7 +46,7 @@ export function SearchPanel({
     <div className="flex w-full flex-col items-center">
       <div
         ref={groupRef}
-        className={`relative w-full overflow-hidden shadow-2xl transition-all duration-500 ease-out ${
+        className={`relative w-full overflow-hidden shadow-2xl transition-all duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
           morphed
             ? "h-[54vh] max-w-5xl rounded-[2rem]"
             : "h-14 max-w-xl rounded-full shadow-[0_8px_40px_rgba(0,0,0,0.18)]"
@@ -82,72 +82,77 @@ export function SearchPanel({
             morphed ? "p-4 sm:p-6" : ""
           }`}
         >
-          {morphed && (
-            <button
-              type="button"
-              onClick={flow.reset}
-              aria-label="Start a new search"
-              className="absolute top-4 left-4 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-ink text-white transition hover:opacity-80 sm:top-6 sm:left-6"
-            >
-              <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5" aria-hidden>
-                <path
-                  d="M19 12H5.5M11 6l-6.5 6 6.5 6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
-
-          {/* The input itself never remounts across phases — same DOM
-              node throughout — so focus and whatever's typed survives
-              every transition. It sits at the top of the rectangle once
-              morphed, staying editable for a follow-up search. */}
-          <div className={`relative shrink-0 ${morphed ? "ml-12 sm:ml-14" : ""}`}>
-            <input
-              ref={flow.inputRef}
-              type="text"
-              readOnly={phase === "loading"}
-              onFocus={flow.activate}
-              onChange={flow.clearErrorOnEdit}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && canSubmit) flow.submit();
-              }}
-              placeholder="Tell us your idea - we'll tell you if it exists already"
-              className={`font-body h-14 w-full rounded-full bg-surface/85 px-6 text-ink shadow-[0_4px_20px_rgba(0,0,0,0.1)] ring-1 ring-white/50 backdrop-blur-md outline-none transition-[padding] duration-500 ease-out placeholder:text-ink/50 ${
-                phase !== "idle" ? "pr-16" : ""
-              }`}
-            />
-            <button
-              type="button"
-              onClick={flow.submit}
-              aria-label="Check if it exists"
-              disabled={!canSubmit}
-              tabIndex={phase !== "idle" ? 0 : -1}
-              className={`absolute top-1/2 right-2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-ink text-white transition-all duration-300 ${
-                phase !== "idle" ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"
-              }`}
-            >
-              {phase === "loading" ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              ) : (
+          {/* Back button and input share one flex row so they're always
+              vertically centered on each other, regardless of exact
+              sizing — no manual offset math to keep in sync. */}
+          <div className="flex shrink-0 items-center gap-3">
+            {morphed && (
+              <button
+                type="button"
+                onClick={flow.reset}
+                aria-label="Start a new search"
+                className="animate-fade-in-up flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-full bg-ink text-white transition hover:opacity-80"
+              >
                 <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
                   <path
-                    d="M5 12h13.5M13 6l6.5 6-6.5 6"
+                    d="M19 12H5.5M11 6l-6.5 6 6.5 6"
                     stroke="currentColor"
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
-              )}
-            </button>
+              </button>
+            )}
+
+            {/* The input itself never remounts across phases — same DOM
+                node throughout — so focus and whatever's typed survives
+                every transition. It sits at the top of the rectangle
+                once morphed, staying editable for a follow-up search. */}
+            <div className="relative min-w-0 flex-1">
+              <input
+                ref={flow.inputRef}
+                type="text"
+                readOnly={phase === "loading"}
+                onFocus={flow.activate}
+                onChange={flow.clearErrorOnEdit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canSubmit) flow.submit();
+                }}
+                placeholder="Tell us your idea - we'll tell you if it exists already"
+                className={`font-body h-14 w-full rounded-full bg-surface/85 px-6 text-ink shadow-[0_4px_20px_rgba(0,0,0,0.1)] ring-1 ring-white/50 backdrop-blur-md outline-none transition-[padding] duration-500 ease-out placeholder:text-ink/50 ${
+                  phase !== "idle" ? "pr-16" : ""
+                }`}
+              />
+              <button
+                type="button"
+                onClick={flow.submit}
+                aria-label="Check if it exists"
+                disabled={!canSubmit}
+                tabIndex={phase !== "idle" ? 0 : -1}
+                className={`absolute top-1/2 right-2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-ink text-white transition-all duration-300 ${
+                  phase !== "idle" ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"
+                }`}
+              >
+                {phase === "loading" ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                    <path
+                      d="M5 12h13.5M13 6l6.5 6-6.5 6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
 
           {morphed && (
-            <div className="mt-4 min-h-0 flex-1 ml-0">
+            <div className="animate-fade-in-up mt-4 min-h-0 flex-1 [animation-delay:120ms]">
               {phase === "loading" && <VerdictSkeleton />}
               {phase === "result" && flow.result && <VerdictResults result={flow.result} />}
               {phase === "error" && (

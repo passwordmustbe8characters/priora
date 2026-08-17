@@ -56,3 +56,28 @@ body {
     animation: none;
   }
 }
+
+/* Content that appears partway through the pill→rectangle morph (the
+   back button, the results/skeleton area) fades and settles in rather
+   than popping the instant it mounts — makes the whole morph read as
+   one continuous motion instead of a resize plus an abrupt swap. */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 400ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up {
+    animation: none;
+  }
+}
