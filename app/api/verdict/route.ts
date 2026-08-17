@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { runVerdictPipeline } from "../../lib/pipeline";
+import { runVerdictPipeline, lastUpsertError } from "../../lib/pipeline";
 import { getCachedVerdict, setCachedVerdict } from "../../lib/cache";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,9 @@ export async function POST(request: NextRequest) {
   try {
     const result = await runVerdictPipeline(idea);
     setCachedVerdict(idea, result);
-    return Response.json(result, { headers: { "X-Cache": "MISS" } });
+    const headers: Record<string, string> = { "X-Cache": "MISS" };
+    if (lastUpsertError) headers["X-Cache-Write-Error"] = lastUpsertError.slice(0, 200);
+    return Response.json(result, { headers });
   } catch (err) {
     console.error("verdict pipeline failed:", err);
     return errorResponse(502, "VERDICT_UNAVAILABLE", "Couldn't check that idea right now. Please try again.");

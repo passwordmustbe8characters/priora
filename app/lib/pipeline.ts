@@ -25,6 +25,12 @@ import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
 
 const MIN_CACHE_CANDIDATES = 3;
 
+// TEMPORARY diagnostic: surfaces a swallowed cache-write error without
+// changing the response contract, so it can be read via a debug header
+// in production where console logs aren't reachable. Remove once the
+// current upsert issue is confirmed fixed.
+export let lastUpsertError: string | null = null;
+
 // ---------------------------------------------------------------------
 // Stage 1: Idea Normalizer
 // ---------------------------------------------------------------------
@@ -333,6 +339,7 @@ export async function runVerdictPipeline(rawIdea: string): Promise<VerdictRespon
       );
     } catch (err) {
       console.error("company cache upsert failed:", err);
+      lastUpsertError = err instanceof Error ? err.message : String(err);
     }
   }
 
