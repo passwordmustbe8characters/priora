@@ -3,10 +3,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { QUOTES } from "../lib/quotes";
 
-const CIRCLE_COUNT = 16;
+const CIRCLE_COUNT = 50;
 const MAX_SPEED = 0.5; // px/frame — "excited but not too fast"
 const EDGE_MARGIN = 6;
 const KEEPOUT_LERP = 0.06; // how fast the keepout zone eases toward its target size
+const HOVER_LERP = 0.1; // how fast a circle's "hover amount" eases toward 0 or 1 — roughly matches the 500ms CSS grow/shrink so physics and visuals stay in sync
+const HOVER_EPS = 0.01; // below this, treat hover amount as settled (snap to the resting value)
 
 // useLayoutEffect warns during SSR; this component is purely decorative
 // and client-only, so fall back to useEffect there rather than guard
@@ -21,6 +23,13 @@ interface CircleBody {
   vx: number;
   vy: number;
   hovered: boolean;
+  // Eased 0→1 "how hovered" amount — separate from the `hovered` flag so
+  // growing AND shrinking both ease smoothly instead of snapping. A body
+  // is positionally frozen (no velocity, no transform updates, treated
+  // as immovable by neighbors) whenever this is above ~0: that covers
+  // the whole grow phase, the hovered hold, and the shrink-back tail, so
+  // it never jump-resumes mid-shrink.
+  hoverT: number;
 }
 
 function rand(min: number, max: number) {
@@ -104,7 +113,7 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
         } while (isInsideKeepout(x, y, radius) && tries < 40);
         const angle = rand(0, Math.PI * 2);
         const speed = rand(MAX_SPEED * 0.4, MAX_SPEED);
-        return { id, radius, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, hovered: false };
+        return { id, radius, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, hovered: false, hoverT: 0 };
       });
       bodiesRef.current = bodies;
       setRadii(bodies.map((b) => b.radius));
@@ -123,7 +132,7 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
   }, []);
 
   // Animation loop — positions are applied via direct DOM mutation
-  // (el.style.transform), not React state, so 16 bouncing bodies don't
+  // (el.style.transform), not React state, so 50 bouncing bodies don't
   // trigger a re-render every frame.
   useEffect(() => {
     let rafId: number;
@@ -148,8 +157,20 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
       k.y = height / 2 - k.h / 2;
 
       if (readyRef.current && !reducedMotionRef.current) {
+        // Ease each body's hover amount toward its target first, so the
+        // collision pass below (which reads hoverT) sees this frame's
+        // updated value — a circle that just un-hovered still counts as
+        // "frozen and big" for a few frames while it eases back down.
         for (const b of bodies) {
-          if (b.hovered) continue;
+          const hoverTarget = b.hovered ? 1 : 0;
+          b.hoverT += (hoverTarget - b.hoverT) * HOVER_LERP;
+          if (b.hoverT < HOVER_EPS) b.hoverT = 0;
+          else if (b.hoverT > 1 - HOVER_EPS) b.hoverT = 1;
+        }
+
+        for (const b of bodies) {
+          const frozen = b.hovered || b.hoverT > 0;
+          if (frozen) continue;
           b.x += b.vx;
           b.y += b.vy;
 
@@ -196,11 +217,14 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
           for (let j = i + 1; j < bodies.length; j++) {
             const a = bodies[i];
             const b = bodies[j];
-            // A hovered (enlarged) circle uses its real current on-screen
-            // radius for collision — it's still an actual circle, just a
-            // bigger one, so no shape approximation needed.
-            const ra = a.hovered ? HOVER_RADIUS : a.radius;
-            const rb = b.hovered ? HOVER_RADIUS : b.radius;
+            // Effective radius eases from its resting radius up to
+            // HOVER_RADIUS (and back down) as hoverT eases — so the push
+            // on neighbors ramps up/down smoothly instead of snapping
+            // the instant a hover starts or ends.
+            const ra = a.radius + (HOVER_RADIUS - a.radius) * a.hoverT;
+            const rb = b.radius + (HOVER_RADIUS - b.radius) * b.hoverT;
+            const aFrozen = a.hovered || a.hoverT > 0;
+            const bFrozen = b.hovered || b.hoverT > 0;
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dist = Math.hypot(dx, dy) || 0.0001;
@@ -211,19 +235,19 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
             const ny = dy / dist;
             const overlap = minDist - dist;
 
-            if (a.hovered && !b.hovered) {
+            if (aFrozen && !bFrozen) {
               b.x += nx * overlap;
               b.y += ny * overlap;
               const vn = b.vx * nx + b.vy * ny;
               b.vx -= 2 * vn * nx;
               b.vy -= 2 * vn * ny;
-            } else if (b.hovered && !a.hovered) {
+            } else if (bFrozen && !aFrozen) {
               a.x -= nx * overlap;
               a.y -= ny * overlap;
               const vn = a.vx * nx + a.vy * ny;
               a.vx -= 2 * vn * nx;
               a.vy -= 2 * vn * ny;
-            } else if (!a.hovered && !b.hovered) {
+            } else if (!aFrozen && !bFrozen) {
               a.x -= (nx * overlap) / 2;
               a.y -= (ny * overlap) / 2;
               b.x += (nx * overlap) / 2;
@@ -235,13 +259,17 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
               b.vx += (van - vbn) * nx;
               b.vy += (van - vbn) * ny;
             }
+            // both frozen: two hovered/settling circles overlapping is
+            // vanishingly rare (keepout + spacing) and neither can move
+            // anyway, so there's nothing to resolve.
           }
         }
       }
 
       for (const b of bodies) {
         const el = elRefs.current[b.id];
-        if (el && !b.hovered) {
+        const frozen = b.hovered || b.hoverT > 0;
+        if (el && !frozen) {
           el.style.transform = `translate(${b.x}px, ${b.y}px) translate(-50%, -50%)`;
         }
       }
@@ -286,8 +314,18 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
             }}
             onMouseEnter={() => handleEnter(id)}
             onMouseLeave={() => handleLeave(id)}
-            className={`pointer-events-auto absolute top-0 left-0 flex aspect-square cursor-pointer items-center justify-center rounded-full bg-foreground shadow-lg transition-[width,height,padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              hovered ? "z-20 w-64 p-8 sm:w-80 sm:p-10" : "z-10 overflow-hidden"
+            // Growing and shrinking use different timing functions on
+            // purpose: the punchy front-loaded curve reads as a nice
+            // "pop" when growing, but the exact same curve run in
+            // reverse for the shrink collapses almost the whole way
+            // within the first fraction of the duration and then just
+            // creeps the rest — it reads as an abrupt snap, not smooth.
+            // An even ease-in-out shrink fixes that without touching
+            // the grow feel at all.
+            className={`pointer-events-auto absolute top-0 left-0 flex aspect-square cursor-pointer items-center justify-center rounded-full bg-foreground shadow-lg transition-[width,height,padding] duration-500 ${
+              hovered
+                ? "z-20 w-64 p-8 ease-[cubic-bezier(0.22,1,0.36,1)] sm:w-80 sm:p-10"
+                : "z-10 overflow-hidden ease-[cubic-bezier(0.4,0,0.2,1)]"
             }`}
             style={hovered ? undefined : { width: diameter, height: diameter }}
           >
@@ -296,10 +334,10 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
                 hovered ? "opacity-100 delay-150" : "pointer-events-none h-0 w-0 opacity-0"
               }`}
             >
-              <p className="font-body line-clamp-6 text-xs text-background/90 sm:text-sm">
+              <p className="font-body line-clamp-6 text-sm text-background/90 sm:text-base">
                 &ldquo;{quote.text}&rdquo;
               </p>
-              <p className="font-body mt-3 text-[10px] text-background/50 sm:text-xs">{quote.author}</p>
+              <p className="font-body mt-3 text-xs text-background/50 sm:text-sm">{quote.author}</p>
             </div>
           </div>
         );
