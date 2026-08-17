@@ -105,11 +105,54 @@ Curated down from a broader market-research template. Left out, with why:
   stale fast (follower counts, channel mix) — better suited to a deeper
   Phase 3 report than a persistent cache row
 - **Source/Link** — already covered by `url` and `source`
-- **Dedup/upsert logic** — inserting/updating rows during ingestion is the
-  Caching Layer component's job, not this one
 - **matchScore** — deliberately excluded. It's a per-query relevance score
   computed at match time against a specific founder's idea, not an
   intrinsic property of the company — it shouldn't be persisted here
+
+## Caching Layer
+
+Implemented in [`app/lib/db/companies.ts`](../app/lib/db/companies.ts),
+wired into the pipeline in [`app/lib/pipeline.ts`](../app/lib/pipeline.ts).
+
+**Freshness**: one clock per row, `last_updated_at` — not per column. See
+"which fields actually go stale" reasoning below. Default window is
+**30 days**, overridable via `COMPANY_CACHE_TTL_DAYS` without a code
+change.
+
+**Cache-fields volatility, for context on why one row-level TTL is
+enough**: `pricing`, `funding_stage`, `traction_notes`, `key_features`,
+`notable_partnerships`, `company_stage` change on the order of weeks to
+months; `description`, `business_model`, `target_audience`,
+`value_proposition`, `positioning`, `primary_competitors`,
+`competitive_advantage`, `weaknesses`, `opportunity_gap` shift over
+6-12 months; `name`, `url`, `region`, `country`, `year_founded`,
+`customer_type`, `core_problem` are essentially static. Field-level
+staleness tracking would be real complexity for marginal benefit at this
+stage — the volatile fields are also the ones a Phase 3 deep-report pass
+would refresh anyway.
+
+**Hit/miss logic**: a request's category tags (from the Idea Normalizer)
+are checked against `category_tags` overlap (`&&`) with a freshness
+filter. **3 or more** fresh matches (`MIN_CACHE_CANDIDATES` in
+`pipeline.ts`) → skip the paid `web_search` call, re-score what's cached.
+Fewer than that → pay for a real search, then upsert the results (keyed
+on `url` via `companies_url_unique`, which is why that index exists) so
+the next similar idea doesn't pay for the same search again.
+
+**Cost property, not just a nice-to-have**: this is strictly
+cache-hit-saves, cache-miss-costs-the-same-as-not-caching. A DB lookup
+costs nothing next to a $0.01+-per-call, several-second `web_search`
+request — there's no scenario where checking the cache first costs more
+than skipping it.
+
+**Deliberately deferred here**: the live-search upsert only populates
+identity-level fields (name, description, url, source, region, country,
+pricing, funding stage) — not the deeper research fields (business
+model, positioning, weaknesses, competitive advantage, etc.). Filling
+those in reliably needs more than one low-context search pass per
+company; that's Phase 3's Deep Report Generator's job, which explicitly
+does 2-3 additional targeted passes. Populating them speculatively here
+would risk plausible-sounding fabrication rather than grounded research.
 
 ## Local commands
 

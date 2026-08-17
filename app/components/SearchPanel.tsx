@@ -15,7 +15,8 @@ export function SearchPanel({
   theme: Theme;
   onPhaseChange: (phase: Phase) => void;
 }) {
-  const flow = useVerdictFlow();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const flow = useVerdictFlow(inputRef);
   const { phase } = flow;
   const groupRef = useRef<HTMLDivElement>(null);
 
@@ -31,7 +32,7 @@ export function SearchPanel({
     if (phase !== "active") return;
     const handlePointerDown = (event: PointerEvent) => {
       if (groupRef.current && !groupRef.current.contains(event.target as Node)) {
-        flow.inputRef.current?.blur();
+        inputRef.current?.blur();
         flow.cancel();
       }
     };
@@ -46,9 +47,9 @@ export function SearchPanel({
     <div className="flex w-full flex-col items-center">
       <div
         ref={groupRef}
-        className={`relative w-full overflow-hidden shadow-2xl transition-all duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        className={`relative w-full overflow-hidden shadow-2xl transition-all duration-600 ease-[cubic-bezier(0.22,1,0.36,1)] ${
           morphed
-            ? "h-[54vh] max-w-5xl rounded-[2rem]"
+            ? "h-[54vh] max-w-5xl rounded-4xl"
             : "h-14 max-w-xl rounded-full shadow-[0_8px_40px_rgba(0,0,0,0.18)]"
         }`}
       >
@@ -111,7 +112,7 @@ export function SearchPanel({
                 once morphed, staying editable for a follow-up search. */}
             <div className="relative min-w-0 flex-1">
               <input
-                ref={flow.inputRef}
+                ref={inputRef}
                 type="text"
                 readOnly={phase === "loading"}
                 onFocus={flow.activate}

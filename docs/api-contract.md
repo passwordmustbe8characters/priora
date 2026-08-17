@@ -12,25 +12,33 @@ real before the backend pipeline exists.
 
 ## Pipeline (internal, not separate endpoints)
 
-One public endpoint fronts a four-stage internal pipeline. The stages map
-1:1 to the spec's Phase 1 backend components — useful for Casmir/Delight
-to split work even though only the final result crosses the network:
+One public endpoint fronts the internal pipeline. As of Phase 2's Caching
+Layer, this branches on whether fresh cached candidates exist — full
+detail (freshness window, what triggers a cache hit vs miss) is in
+[db-schema.md](./db-schema.md). The request/response contract below is
+unchanged either way; the branching is invisible to the frontend.
 
 ```
 raw idea text
      │
      ▼
-1. Idea Normalizer      → cleans/restates the idea into a canonical form
+1. Idea Normalizer   → cleans/restates the idea, extracts category tags
+     │                  (a cheap call — no search yet)
+     ▼
+2. Cache lookup       → companies table, filtered by category tag overlap
+     │                  + freshness window
+     │
+     ├─ enough fresh matches ──► 3a. Relevance Matcher (cache)
+     │                            re-scores cached candidates, no search
+     │
+     └─ not enough ────────────► 3b. Candidate Retrieval + Relevance
+                                     Matcher (live) — paid web search,
+                                     then upserts results into the cache
+                                     for next time
      │
      ▼
-2. Candidate Retrieval   → live search (no DB in Phase 1) against Western
-     │                     + African sources for plausible competitors
-     ▼
-3. Relevance Matcher     → scores each candidate against the normalized
-     │                     idea, drops weak matches
-     ▼
 4. Free Verdict Assembly → composes status + headline + top matches
-     │                     into the response below
+     │                      into the response below
      ▼
   response
 ```
@@ -125,6 +133,9 @@ Plain liveness check for Hosting & Environment Setup. Returns `200` with
 ## Out of scope for Phase 1
 
 - No auth — the free verdict is anonymous, no login
-- No persistence — nothing from this request is stored yet (Phase 2 adds
-  the Postgres-backed source cache)
 - No streaming/partial results — the frontend waits for the full response
+
+As of Phase 2, companies found during a live search *are* persisted (see
+[db-schema.md](./db-schema.md)) — this powers the cache, not a
+user-facing feature. Nothing about a specific founder's request is
+stored; the cache is keyed on category tags, not on who asked.

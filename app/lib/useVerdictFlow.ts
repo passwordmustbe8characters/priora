@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState, type RefObject } from "react";
 import { submitIdea, VerdictError, type VerdictResponse } from "./verdict";
 
 export type Phase = "idle" | "active" | "loading" | "result" | "error";
@@ -12,12 +12,18 @@ export type Phase = "idle" | "active" | "loading" | "result" | "error";
  * read via inputRef) rather than in React state — it's never cleared on a
  * successful search, so it stays visible/editable for a follow-up query,
  * and Enter re-submits from "result" or "error" just like from "active".
+ *
+ * inputRef is created by the caller and passed in, not created/returned
+ * here — a hook returning an object that bundles a ref alongside plain
+ * render state trips the react-hooks/refs lint rule, which (correctly
+ * conservatively) can't prove property access on the combined object is
+ * never a ref read. Keeping ref ownership in the component and state
+ * ownership in the hook sidesteps that entirely.
  */
-export function useVerdictFlow() {
+export function useVerdictFlow(inputRef: RefObject<HTMLInputElement | null>) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<VerdictResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const activate = () => {
     if (phase === "idle") setPhase("active");
@@ -63,5 +69,5 @@ export function useVerdictFlow() {
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  return { phase, result, errorMessage, inputRef, activate, cancel, submit, reset, clearErrorOnEdit };
+  return { phase, result, errorMessage, activate, cancel, submit, reset, clearErrorOnEdit };
 }
