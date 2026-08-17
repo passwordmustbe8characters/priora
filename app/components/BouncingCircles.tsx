@@ -3,12 +3,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { QUOTES } from "../lib/quotes";
 
+const CIRCLE_COUNT = 16;
 const MAX_SPEED = 0.5; // px/frame — "excited but not too fast"
 const EDGE_MARGIN = 6;
-// Approximate half-diagonal of the morphed card — used only for collision
-// math so other circles physically get pushed away from roughly the
-// rectangle's footprint, not just its original circular one.
-const MORPH_AVOIDANCE_RADIUS = 200;
+const KEEPOUT_LERP = 0.06; // how fast the keepout zone eases toward its target size
 
 // useLayoutEffect warns during SSR; this component is purely decorative
 // and client-only, so fall back to useEffect there rather than guard
@@ -22,19 +20,26 @@ interface CircleBody {
   y: number;
   vx: number;
   vy: number;
-  morphed: boolean;
+  hovered: boolean;
 }
 
 function rand(min: number, max: number) {
   return min + Math.random() * (max - min);
 }
 
-export function BouncingCircles() {
+/**
+ * `expanded` grows the center keepout zone (eased, not instant) — used
+ * when the search card morphs into its results-preview size, so nearby
+ * circles get physically pushed out of its way via the same AABB
+ * collision the keepout always used, just with a bigger target.
+ */
+export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bodiesRef = useRef<CircleBody[]>([]);
   const elRefs = useRef<(HTMLDivElement | null)[]>([]);
   const sizeRef = useRef({ width: 0, height: 0 });
   const keepoutRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const expandedRef = useRef(expanded);
   const reducedMotionRef = useRef(false);
   const readyRef = useRef(false);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
@@ -45,6 +50,17 @@ export function BouncingCircles() {
   // ref's .current during render is exactly what react-hooks/refs flags,
   // and rightly so here — bodiesRef changes every animation frame.
   const [radii, setRadii] = useState<number[]>([]);
+
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+
+  function keepoutTarget() {
+    const { width, height } = sizeRef.current;
+    return expandedRef.current
+      ? { w: Math.min(820, width * 0.86), h: Math.min(600, height * 0.72) }
+      : { w: Math.min(680, width * 0.72), h: Math.min(360, height * 0.52) };
+  }
 
   // Measure the container and (re)seed circle bodies. Runs before paint so
   // there's no visible jump from an initial 0,0 position.
@@ -60,13 +76,12 @@ export function BouncingCircles() {
     function measure() {
       const rect = container!.getBoundingClientRect();
       sizeRef.current = { width: rect.width, height: rect.height };
-      const kw = Math.min(680, rect.width * 0.72);
-      const kh = Math.min(360, rect.height * 0.52);
+      const target = keepoutTarget();
       keepoutRef.current = {
-        x: rect.width / 2 - kw / 2,
-        y: rect.height / 2 - kh / 2,
-        w: kw,
-        h: kh,
+        x: rect.width / 2 - target.w / 2,
+        y: rect.height / 2 - target.h / 2,
+        w: target.w,
+        h: target.h,
       };
     }
     measure();
@@ -74,10 +89,10 @@ export function BouncingCircles() {
     if (bodiesRef.current.length === 0) {
       const { width } = sizeRef.current;
       const small = width < 520;
-      const minR = small ? 16 : 24;
-      const maxR = small ? 32 : 50;
+      const minR = small ? 18 : 26;
+      const maxR = small ? 42 : 70;
 
-      const bodies: CircleBody[] = QUOTES.map((_, id) => {
+      const bodies: CircleBody[] = Array.from({ length: CIRCLE_COUNT }, (_, id) => {
         const radius = rand(minR, maxR);
         let x = 0;
         let y = 0;
@@ -89,7 +104,7 @@ export function BouncingCircles() {
         } while (isInsideKeepout(x, y, radius) && tries < 40);
         const angle = rand(0, Math.PI * 2);
         const speed = rand(MAX_SPEED * 0.4, MAX_SPEED);
-        return { id, radius, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, morphed: false };
+        return { id, radius, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, hovered: false };
       });
       bodiesRef.current = bodies;
       setRadii(bodies.map((b) => b.radius));
@@ -108,7 +123,7 @@ export function BouncingCircles() {
   }, []);
 
   // Animation loop — positions are applied via direct DOM mutation
-  // (el.style.transform), not React state, so 10 bouncing bodies don't
+  // (el.style.transform), not React state, so 16 bouncing bodies don't
   // trigger a re-render every frame.
   useEffect(() => {
     let rafId: number;
@@ -122,9 +137,19 @@ export function BouncingCircles() {
       const bodies = bodiesRef.current;
       const { width, height } = sizeRef.current;
 
+      // Ease the keepout zone toward whatever size it should currently be
+      // — this is what makes nearby circles get pushed away smoothly as
+      // the search card grows, using the exact same collision code below.
+      const target = keepoutTarget();
+      const k = keepoutRef.current;
+      k.w += (target.w - k.w) * KEEPOUT_LERP;
+      k.h += (target.h - k.h) * KEEPOUT_LERP;
+      k.x = width / 2 - k.w / 2;
+      k.y = height / 2 - k.h / 2;
+
       if (readyRef.current && !reducedMotionRef.current) {
         for (const b of bodies) {
-          if (b.morphed) continue;
+          if (b.hovered) continue;
           b.x += b.vx;
           b.y += b.vy;
 
@@ -146,7 +171,6 @@ export function BouncingCircles() {
           }
 
           if (isInsideKeepout(b.x, b.y, b.radius)) {
-            const k = keepoutRef.current;
             const overlapLeft = b.x + b.radius - k.x;
             const overlapRight = k.x + k.w - (b.x - b.radius);
             const overlapTop = b.y + b.radius - k.y;
@@ -172,8 +196,11 @@ export function BouncingCircles() {
           for (let j = i + 1; j < bodies.length; j++) {
             const a = bodies[i];
             const b = bodies[j];
-            const ra = a.morphed ? MORPH_AVOIDANCE_RADIUS : a.radius;
-            const rb = b.morphed ? MORPH_AVOIDANCE_RADIUS : b.radius;
+            // A hovered (enlarged) circle uses its real current on-screen
+            // radius for collision — it's still an actual circle, just a
+            // bigger one, so no shape approximation needed.
+            const ra = a.hovered ? HOVER_RADIUS : a.radius;
+            const rb = b.hovered ? HOVER_RADIUS : b.radius;
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dist = Math.hypot(dx, dy) || 0.0001;
@@ -184,19 +211,19 @@ export function BouncingCircles() {
             const ny = dy / dist;
             const overlap = minDist - dist;
 
-            if (a.morphed && !b.morphed) {
+            if (a.hovered && !b.hovered) {
               b.x += nx * overlap;
               b.y += ny * overlap;
               const vn = b.vx * nx + b.vy * ny;
               b.vx -= 2 * vn * nx;
               b.vy -= 2 * vn * ny;
-            } else if (b.morphed && !a.morphed) {
+            } else if (b.hovered && !a.hovered) {
               a.x -= nx * overlap;
               a.y -= ny * overlap;
               const vn = a.vx * nx + a.vy * ny;
               a.vx -= 2 * vn * nx;
               a.vy -= 2 * vn * ny;
-            } else if (!a.morphed && !b.morphed) {
+            } else if (!a.hovered && !b.hovered) {
               a.x -= (nx * overlap) / 2;
               a.y -= (ny * overlap) / 2;
               b.x += (nx * overlap) / 2;
@@ -214,7 +241,7 @@ export function BouncingCircles() {
 
       for (const b of bodies) {
         const el = elRefs.current[b.id];
-        if (el && !b.morphed) {
+        if (el && !b.hovered) {
           el.style.transform = `translate(${b.x}px, ${b.y}px) translate(-50%, -50%)`;
         }
       }
@@ -229,13 +256,13 @@ export function BouncingCircles() {
   const handleEnter = (id: number) => {
     setHoveredId(id);
     const b = bodiesRef.current.find((c) => c.id === id);
-    if (b) b.morphed = true;
+    if (b) b.hovered = true;
   };
 
   const handleLeave = (id: number) => {
     setHoveredId(null);
     const b = bodiesRef.current.find((c) => c.id === id);
-    if (b) b.morphed = false;
+    if (b) b.hovered = false;
   };
 
   return (
@@ -246,8 +273,9 @@ export function BouncingCircles() {
       }`}
       aria-hidden
     >
-      {QUOTES.map((quote, id) => {
-        const morphed = hoveredId === id;
+      {Array.from({ length: CIRCLE_COUNT }, (_, id) => {
+        const quote = QUOTES[id % QUOTES.length];
+        const hovered = hoveredId === id;
         const diameter = radii[id] ? radii[id] * 2 : 0;
 
         return (
@@ -258,20 +286,20 @@ export function BouncingCircles() {
             }}
             onMouseEnter={() => handleEnter(id)}
             onMouseLeave={() => handleLeave(id)}
-            className={`pointer-events-auto absolute top-0 left-0 flex cursor-pointer items-center justify-center bg-black shadow-lg ring-1 ring-white/10 transition-[width,height,border-radius,padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              morphed
-                ? "z-20 max-h-80 w-72 overflow-y-auto rounded-3xl p-5 sm:w-96"
-                : "z-10 overflow-hidden rounded-full"
+            className={`pointer-events-auto absolute top-0 left-0 flex aspect-square cursor-pointer items-center justify-center rounded-full bg-foreground shadow-lg transition-[width,height,padding] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              hovered ? "z-20 w-64 p-8 sm:w-80 sm:p-10" : "z-10 overflow-hidden"
             }`}
-            style={morphed ? undefined : { width: diameter, height: diameter }}
+            style={hovered ? undefined : { width: diameter, height: diameter }}
           >
             <div
               className={`text-center transition-opacity duration-300 ${
-                morphed ? "opacity-100 delay-150" : "pointer-events-none h-0 w-0 opacity-0"
+                hovered ? "opacity-100 delay-150" : "pointer-events-none h-0 w-0 opacity-0"
               }`}
             >
-              <p className="font-body text-sm text-white/90 sm:text-base">&ldquo;{quote.text}&rdquo;</p>
-              <p className="font-body mt-3 text-xs text-white/50">{quote.author}</p>
+              <p className="font-body line-clamp-6 text-xs text-background/90 sm:text-sm">
+                &ldquo;{quote.text}&rdquo;
+              </p>
+              <p className="font-body mt-3 text-[10px] text-background/50 sm:text-xs">{quote.author}</p>
             </div>
           </div>
         );
@@ -279,3 +307,8 @@ export function BouncingCircles() {
     </div>
   );
 }
+
+// Matches the hovered box's actual rendered radius (w-80/2 = 160px at the
+// sm+ breakpoint) closely enough for collision purposes — it only needs
+// to be in the right neighborhood, not pixel-exact.
+const HOVER_RADIUS = 150;
