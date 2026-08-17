@@ -56,27 +56,3 @@ body {
     animation: none;
   }
 }
-
-/* Entrance for whatever's showing inside the panel (pill / skeleton /
-   result) — applied via a `key`-forced remount on phase change, so each
-   swap fades and rises in rather than popping. */
-@keyframes panel-content-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-panel-in {
-  animation: panel-content-in 400ms ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-panel-in {
-    animation: none;
-  }
-}
