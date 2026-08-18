@@ -66,9 +66,12 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
 
   function keepoutTarget() {
     const { width, height } = sizeRef.current;
+    // The resting (non-expanded) zone only needs to clear the search
+    // pill itself, not a generous halo around it — too big and it reads
+    // as an obvious empty gap in the middle of the screen.
     return expandedRef.current
       ? { w: Math.min(820, width * 0.86), h: Math.min(600, height * 0.72) }
-      : { w: Math.min(680, width * 0.72), h: Math.min(360, height * 0.52) };
+      : { w: Math.min(520, width * 0.56), h: Math.min(260, height * 0.36) };
   }
 
   // Measure the container and (re)seed circle bodies. Runs before paint so

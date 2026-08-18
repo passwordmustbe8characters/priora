@@ -38,20 +38,20 @@ export function ThemeToggle({
       type="button"
       onClick={onToggle}
       aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-      className="flex h-9 w-16 cursor-pointer items-center rounded-full border border-foreground/15 bg-foreground/5 px-1 transition-colors hover:border-foreground/30"
+      className="flex h-12 w-20 cursor-pointer items-center rounded-full border border-foreground/15 bg-foreground/5 px-1.5 transition-colors hover:border-foreground/30"
     >
       <span
-        className={`relative flex h-7 w-7 items-center justify-center rounded-full bg-surface shadow-md transition-transform duration-300 ease-out ${
-          isDark ? "translate-x-7" : "translate-x-0"
+        className={`relative flex h-9 w-9 items-center justify-center rounded-full bg-surface shadow-md transition-transform duration-300 ease-out ${
+          isDark ? "translate-x-8" : "translate-x-0"
         }`}
       >
         <SunIcon
-          className={`absolute h-4 w-4 text-ink transition-all duration-300 ${
+          className={`absolute h-5 w-5 text-ink transition-all duration-300 ${
             isDark ? "rotate-90 scale-0 opacity-0" : "rotate-0 scale-100 opacity-100"
           }`}
         />
         <MoonIcon
-          className={`absolute h-4 w-4 text-ink transition-all duration-300 ${
+          className={`absolute h-5 w-5 text-ink transition-all duration-300 ${
             isDark ? "rotate-0 scale-100 opacity-100" : "-rotate-90 scale-0 opacity-0"
           }`}
         />
