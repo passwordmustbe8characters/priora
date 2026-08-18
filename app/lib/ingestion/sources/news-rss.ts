@@ -81,9 +81,12 @@ interface Rss2JsonResponse {
 }
 
 async function fetchFeedItemsViaProxy(feedUrl: string, limit: number): Promise<RssItem[]> {
-  const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}&count=${limit}`;
+  // No `count` param here on purpose — rss2json's free tier requires an
+  // API key to use it (422 otherwise). We slice to `limit` ourselves
+  // below regardless, so it was redundant anyway.
+  const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`rss2json fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(`rss2json fetch failed: ${res.status} ${await res.text()}`);
   const json = (await res.json()) as Rss2JsonResponse;
   if (json.status !== "ok") throw new Error(`rss2json couldn't parse feed: ${json.message || "unknown error"}`);
   return (json.items ?? []).slice(0, limit).map((it) => ({
