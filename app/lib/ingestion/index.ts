@@ -1,16 +1,24 @@
 import { upsertCompanies, type UpsertResult } from "../db/companies";
+import { appStoreConnector } from "./sources/app-store";
+import { briterBridgesConnector } from "./sources/briter-bridges";
 import { crunchbaseConnector } from "./sources/crunchbase";
+import { disruptAfricaConnector } from "./sources/disrupt-africa";
 import { g2Connector } from "./sources/g2";
 import { productHuntConnector } from "./sources/product-hunt";
+import { techcabalConnector } from "./sources/techcabal";
+import { techpointAfricaConnector } from "./sources/techpoint-africa";
+import { weetrackerConnector } from "./sources/weetracker";
 import { ycConnector } from "./sources/yc";
+import { ycAfricaConnector } from "./sources/yc-africa";
 import type { SourceConnector, SourceFetchParams } from "./types";
 
 /**
- * Phase 2 — Source Ingestion (Western). Every connector shares the same
- * interface regardless of whether it's actually usable yet — Crunchbase
- * and G2 are both paid-only and stubbed (`available: false`) rather than
- * scraped or faked; YC and Product Hunt are real. Category tagging here
- * is deliberately best-effort (each source's own topics/industries,
+ * Phase 2 — Source Ingestion (Western + African). Every connector shares
+ * the same interface regardless of whether it's actually usable yet —
+ * paid/gated sources (Crunchbase, G2, Briter Bridges, WeeTracker,
+ * Disrupt Africa) are stubbed (`available: false`) rather than scraped
+ * or faked; the rest are real. Category tagging here is deliberately
+ * best-effort (each source's own topics/industries/extracted tags,
  * lowercased) — building a consistent taxonomy across sources is the
  * separate Category Tagging System component, not this one's job.
  */
@@ -19,6 +27,13 @@ export const CONNECTORS: Record<string, SourceConnector> = {
   "product-hunt": productHuntConnector,
   crunchbase: crunchbaseConnector,
   g2: g2Connector,
+  "yc-africa": ycAfricaConnector,
+  "app-store": appStoreConnector,
+  techcabal: techcabalConnector,
+  "techpoint-africa": techpointAfricaConnector,
+  "briter-bridges": briterBridgesConnector,
+  weetracker: weetrackerConnector,
+  "disrupt-africa": disruptAfricaConnector,
 };
 
 export interface IngestSourceResult {

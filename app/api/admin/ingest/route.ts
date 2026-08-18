@@ -2,7 +2,12 @@ import type { NextRequest } from "next/server";
 import { CONNECTORS, runIngestion } from "../../../lib/ingestion";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // YC dataset is ~10MB, PH is a network round-trip per source
+// The RSS sources run one LLM extraction call per article sequentially,
+// which adds up — 120s gives real headroom. Vercel's plan tier still
+// caps the actual enforced limit regardless of this value (Hobby: 60s
+// hard cap), so keep per-request `limit`/source-count modest in practice
+// rather than relying on this number alone.
+export const maxDuration = 120;
 
 /**
  * On-demand trigger for Source Ingestion — Western (see master spec,

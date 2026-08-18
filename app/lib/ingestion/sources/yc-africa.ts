@@ -1,12 +1,21 @@
 import type { IngestedCompany, SourceConnector } from "../types";
 import { buildTags, deriveCountry, fetchYcDataset, isAfricanCompany } from "./yc-shared";
 
-// No official YC API for bulk directory access — this is a community-
-// maintained open mirror of YC's own public company-directory data,
-// republished as static JSON on GitHub Pages. No key, no scraping.
-export const ycConnector: SourceConnector = {
-  id: "yc",
-  label: "YC Directory",
+/**
+ * A partial, honest stand-in for "accelerator portfolios" — the spec
+ * names a whole set of African accelerators (Flat6Labs, MEST, CcHub,
+ * Techstars Lagos, etc.), each of which would need its own bespoke
+ * scraper against a different site structure, with real ongoing
+ * maintenance burden for uncertain payoff. Rather than build one and
+ * pretend the item is covered, this reuses the YC dataset already
+ * fetched by yc.ts and filters to YC's own African-founder companies —
+ * YC is itself a major accelerator, so this is real accelerator-
+ * portfolio data, just from one accelerator instead of the whole named
+ * list. The rest of that list is a documented gap, not silently skipped.
+ */
+export const ycAfricaConnector: SourceConnector = {
+  id: "yc-africa",
+  label: "YC Directory (Africa)",
   available: true,
 
   async fetch({ limit = 200, filter }): Promise<IngestedCompany[]> {
@@ -15,17 +24,12 @@ export const ycConnector: SourceConnector = {
 
     return all
       .filter((c) => c.status === "Active" && c.name && (c.long_description || c.one_liner))
-      // African companies go through yc-africa.ts instead, tagged
-      // region: "african" — keeps the two pools disjoint rather than
-      // double-processing the same rows with a last-write-wins region.
-      .filter((c) => !isAfricanCompany(c))
+      .filter(isAfricanCompany)
       .filter((c) => {
         if (!filterLower) return true;
         const haystack = [...(c.industries ?? []), ...(c.tags ?? [])].join(" ").toLowerCase();
         return haystack.includes(filterLower);
       })
-      // Most recently launched first — more likely to reflect the
-      // current startup landscape than an arbitrary dataset order.
       .sort((a, b) => (b.launched_at ?? 0) - (a.launched_at ?? 0))
       .slice(0, limit)
       .map((c) => ({
@@ -33,11 +37,9 @@ export const ycConnector: SourceConnector = {
         description: c.long_description || c.one_liner || "",
         url: c.website || c.url || null,
         source: "YC Directory",
-        region: "western" as const,
+        region: "african" as const,
         country: deriveCountry(c.all_locations),
         categoryTags: buildTags(c),
-        // launched_at is when they went through YC, not necessarily
-        // founding year — close enough as a best-effort proxy.
         yearFounded: c.launched_at ? new Date(c.launched_at * 1000).getFullYear() : null,
         companyStage: c.stage || null,
         fundingStage: null,

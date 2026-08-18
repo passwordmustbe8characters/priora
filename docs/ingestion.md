@@ -1,8 +1,8 @@
-# Source Ingestion — Western
+# Source Ingestion — Western & African
 
-Phase 2 component (see master spec). Seeds and refreshes the `companies`
-table from external Western-market sources, independent of the reactive
-per-idea live search the verdict pipeline already does.
+Phase 2 components (see master spec). Seed and refresh the `companies`
+table from external sources, independent of the reactive per-idea live
+search the verdict pipeline already does.
 
 ## Trigger
 
@@ -21,40 +21,67 @@ Content-Type: application/json
 ```
 
 All fields optional. `sources` defaults to every registered connector.
-`filter` meaning is source-specific (YC: industry/tag substring, Product
-Hunt: a topic slug) — sources that don't support filtering ignore it.
+`filter` meaning is source-specific (YC/YC-Africa: industry/tag
+substring, Product Hunt: a topic slug, App Store Search: an actual
+search term — **required** for that one, there's no "browse everything"
+endpoint) — sources that don't support filtering ignore it.
 
 Response: one result per requested source —
 `{ source, ok, fetched, upsert?: { inserted, failed, errors }, error? }`.
 
+The RSS-based sources (TechCabal, Techpoint Africa) run one LLM
+extraction call per article, sequentially — keep `limit` modest (10-15)
+to stay well inside the request time budget.
+
 ## Sources — what's actually live vs stubbed
 
-The master spec names four sources: Crunchbase, Product Hunt, YC
-directory, G2. Two of those don't have a free, ToS-compliant path to
-data, so they're stubbed rather than faked or scraped:
+The master spec names four Western sources (Crunchbase, Product Hunt, YC
+directory, G2) and a set of African ones (Briter Bridges, Disrupt
+Africa, TechCabal, Techpoint Africa, WeeTracker, accelerator portfolios,
+app store search). Several of these don't have a free, ToS-compliant
+path to data, so they're stubbed rather than faked or scraped:
 
 | Source | Status | Notes |
 |---|---|---|
-| **YC Directory** | ✅ Live, no key needed | Pulls from `yc-oss.github.io/api` — a community-maintained open mirror of YC's own public company-directory data, republished as static JSON. Not scraped, not an official API, but openly published for exactly this kind of use. |
-| **Product Hunt** | ✅ Live, needs a free token | Official GraphQL API v2. Create a free app at [producthunt.com/v2/oauth/applications](https://www.producthunt.com/v2/oauth/applications), generate a "Developer Token" on it, set `PRODUCT_HUNT_API_TOKEN`. |
+| **YC Directory** | ✅ Live, no key needed | Pulls from `yc-oss.github.io/api` — a community-maintained open mirror of YC's own public company-directory data, republished as static JSON. Not scraped, not an official API, but openly published for exactly this kind of use. Western companies only — African ones are filtered out here and covered by `yc-africa` instead. |
+| **Product Hunt** | ✅ Live, needs a free token | Official GraphQL API v2. Create a free app at [producthunt.com/v2/oauth/applications](https://www.producthunt.com/v2/oauth/applications), generate a "Developer Token" on it, set `PRODUCT_HUNT_API_TOKEN`. Note: the `url` field it returns is a Product Hunt click-tracking redirect (`producthunt.com/r/...`), not the raw destination — that's intentional on their end for attribution, confirmed their redirect endpoint blocks non-browser requests (403 even with a browser user-agent), so it's stored as-is rather than "unwrapped." |
+| **YC Directory (Africa)** | ✅ Live, no key needed | Same dataset as `yc`, filtered to YC's African-founder companies instead. A **partial stand-in for "accelerator portfolios"** — YC is itself a major accelerator, but the spec's other named accelerators (Flat6Labs, MEST, CcHub, Techstars Lagos, etc.) would each need a bespoke scraper against a different site. Not built — real, documented gap, not silently skipped. |
+| **App Store Search** | ✅ Live, no key needed | Apple's official iTunes Search API, searched across Nigeria/Kenya/South Africa/Ghana/Egypt country codes. No Google Play equivalent — the only free options there are unofficial scrapers of Play Store's internal endpoints, same ToS risk as the stubbed sources below, so it's left out. |
+| **TechCabal** | ✅ Live, no key needed | Their public RSS feed + an LLM extraction pass per article (is this article about one real company? if so, extract it). Real signal, not a structured directory — see the dedup caveat below. |
+| **Techpoint Africa** | ✅ Live, no key needed | Same approach as TechCabal, different feed. |
 | **Crunchbase** | ⛔ Stubbed | No free tier for company search — API access is paid-only. |
 | **G2** | ⛔ Stubbed | No free API; data access is paid/partner-only, and their ToS prohibits scraping. |
+| **Briter Bridges** | ⛔ Stubbed | Their data platform (Briter Intelligence) is subscription-only. |
+| **WeeTracker** | ⛔ Stubbed | Their company/investor database ("The BASE") is a paid product. |
+| **Disrupt Africa** | ⛔ Stubbed | Their 3,000+ startup database is sold as bespoke research, not a queryable API. |
 
 Every connector — live or stubbed — implements the same `SourceConnector`
-interface (`app/lib/ingestion/types.ts`), so wiring in Crunchbase or G2
-later (if/when there's paid access) is just filling in that connector's
-`fetch`, not a redesign.
+interface (`app/lib/ingestion/types.ts`), so wiring in any of the
+stubbed ones later (if/when there's paid access) is just filling in that
+connector's `fetch`, not a redesign.
 
 ## Category tagging
 
-Each connector carries over that source's own tags/topics/industries
-(lowercased, deduped, capped at ~8) as a best-effort `categoryTags`
-value. This is deliberately not a consistent taxonomy across sources —
-building one is the separate **Category Tagging System** component,
-not this one's job.
+Each connector carries over that source's own tags/topics/industries (or,
+for the RSS sources, LLM-extracted tags), lowercased and capped at ~6-8,
+as a best-effort `categoryTags` value. This is deliberately not a
+consistent taxonomy across sources — building one is the separate
+**Category Tagging System** component, not this one's job.
+
+## Known dedup gap (RSS sources)
+
+`upsertCompanies` dedupes on URL — see its own doc comment: rows without
+a URL always insert fresh rather than updating an existing one. News
+articles frequently don't name a company's own canonical URL, so
+TechCabal/Techpoint rows often end up with `url: null`. Repeated
+ingestion runs over the same articles will accumulate duplicate rows for
+the same company until something better than URL-based dedup exists
+(name-based matching is a natural fit for the Category Tagging System
+work, not this component).
 
 ## Region
 
-Every row from this component is tagged `region: "western"` — per the
-schema's convention, `region` records *which Source Ingestion track
-found it*, not a literal claim about where the company operates.
+Every row from these components is tagged `region: "western"` or
+`"african"` depending on which track found it — per the schema's
+convention, `region` records *which Source Ingestion track found it*,
+not a literal claim about where the company operates.
