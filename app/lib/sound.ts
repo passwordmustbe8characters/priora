@@ -27,37 +27,54 @@ export function primeAudio() {
   getCtx();
 }
 
-/** A short, soft typewriter-key tick — a brief filtered noise burst. */
+/** A mechanical typewriter key strike: a sharp high "clack" transient
+ * (type-bar hitting the platen) plus a lower, slightly longer "thunk"
+ * underneath (the mechanism/frame resonance) — two layered noise
+ * bursts instead of one soft tick, for a more physical feel. */
 export function playTypeTick() {
   const ctx = getCtx();
   if (!ctx) return;
   const now = ctx.currentTime;
 
-  const bufferSize = Math.floor(ctx.sampleRate * 0.03);
+  const bufferSize = Math.floor(ctx.sampleRate * 0.05);
   const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
   const data = buffer.getChannelData(0);
   for (let i = 0; i < bufferSize; i++) {
     data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
   }
-
   const noise = ctx.createBufferSource();
   noise.buffer = buffer;
 
-  const filter = ctx.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = 2200 + Math.random() * 800;
-  filter.Q.value = 1.2;
+  // The clack: short, high, sharp.
+  const clack = ctx.createBiquadFilter();
+  clack.type = "bandpass";
+  clack.frequency.value = 3200 + Math.random() * 600;
+  clack.Q.value = 2.2;
 
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.16, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+  const clackGain = ctx.createGain();
+  clackGain.gain.setValueAtTime(0.2, now);
+  clackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
 
-  noise.connect(filter);
-  filter.connect(gain);
-  gain.connect(ctx.destination);
+  // The thunk: lower, a touch longer, gives it weight.
+  const thunk = ctx.createBiquadFilter();
+  thunk.type = "bandpass";
+  thunk.frequency.value = 450 + Math.random() * 100;
+  thunk.Q.value = 1.4;
+
+  const thunkGain = ctx.createGain();
+  thunkGain.gain.setValueAtTime(0.13, now + 0.004);
+  thunkGain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+  noise.connect(clack);
+  clack.connect(clackGain);
+  clackGain.connect(ctx.destination);
+
+  noise.connect(thunk);
+  thunk.connect(thunkGain);
+  thunkGain.connect(ctx.destination);
 
   noise.start(now);
-  noise.stop(now + 0.03);
+  noise.stop(now + 0.05);
 }
 
 /** An airplane-flyby-style whoosh for the intro's swipe-up: a broadband

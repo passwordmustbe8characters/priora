@@ -5,14 +5,27 @@ import { playSwoosh, playTypeTick, primeAudio } from "../lib/sound";
 
 const COPY =
   "Most startup ideas already exist somewhere. Priora tells you which ones — in seconds, with real sources — before you spend months building the wrong thing.";
-const TYPE_SPEED_MS = 55; // per character — slow enough to read along with it
-const HOLD_MS = 5000; // pause after typing finishes, before swiping up
+const HOLD_MS = 3000; // pause after typing finishes, before swiping up
 const SWIPE_MS = 900; // must match the transition duration below, and the swoosh
+
+function rand(min: number, max: number) {
+  return min + Math.random() * (max - min);
+}
+
+/** Deliberately uneven, like someone hunting-and-pecking with one hand
+ * rather than a perfectly uniform machine cadence — longer at word and
+ * punctuation boundaries, a bit of random jitter on ordinary letters. */
+function nextDelay(char: string) {
+  if (char === " ") return rand(140, 220);
+  if (",.—".includes(char)) return rand(220, 320);
+  return rand(90, 170);
+}
 
 /**
  * First thing rendered on load: a black screen that types out a short
  * definition of Priora (hero-sized, matching the old headline's weight),
- * with a soft key-tick per character and an airplane-style whoosh as it
+ * at a deliberately uneven one-hand-typing pace with a mechanical
+ * typewriter clack per character, then an airplane-style whoosh as it
  * swipes up to reveal the page underneath. A muted-speaker icon follows
  * the cursor with a "click for sound" hint until the first click/keypress
  * unlocks audio (browsers block sound before any user gesture), then it
@@ -60,7 +73,7 @@ export function IntroSequence({ onDone }: { onDone: () => void }) {
       setTyped(COPY.slice(0, i));
       if (char && char.trim() !== "") playTypeTick();
       if (i < COPY.length) {
-        typeTimer = setTimeout(typeNext, TYPE_SPEED_MS);
+        typeTimer = setTimeout(typeNext, nextDelay(char));
       } else {
         holdTimer = setTimeout(() => {
           setSwiping(true);
@@ -69,7 +82,7 @@ export function IntroSequence({ onDone }: { onDone: () => void }) {
         }, HOLD_MS);
       }
     }
-    typeTimer = setTimeout(typeNext, TYPE_SPEED_MS);
+    typeTimer = setTimeout(typeNext, nextDelay(COPY[0]));
 
     return () => {
       clearTimeout(typeTimer);
