@@ -21,6 +21,19 @@ import type { IngestedCompany, SourceConnector } from "../types";
  * duplicate rows for the same company until something better than
  * URL-based dedup exists (a natural fit for the later Category Tagging
  * System work, not this component).
+ *
+ * Reachability: direct fetches from this app's Node runtime get blocked
+ * by some of these sites' bot protection — TechCabal by IP reputation
+ * (Vercel's shared serverless ranges, confirmed by that exact request
+ * working fine from a residential IP), Techpoint Africa at the TLS/
+ * client-fingerprint level via Cloudflare Bot Management (confirmed by
+ * a real JS challenge page — "Just a moment..." — coming back through
+ * another proxy attempt; that needs an actual browser to solve, not a
+ * fetch tweak). rss2json.com's public RSS-to-JSON API is a legitimate
+ * fix for the IP-reputation case (it's just another RSS reader, reading
+ * the same public feed via a different network path) — direct fetch is
+ * tried first and this is only a fallback, so if a site's block ever
+ * lifts this goes back to not depending on a third party at all.
  */
 
 interface RssItem {
@@ -41,16 +54,58 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-async function fetchFeedItems(feedUrl: string, limit: number): Promise<RssItem[]> {
+async function fetchFeedItemsDirect(feedUrl: string, limit: number): Promise<RssItem[]> {
   const res = await fetch(feedUrl, { headers: { "User-Agent": "PrioraIngestionBot/1.0 (+https://priora-chi.vercel.app/)" } });
-  if (!res.ok) throw new Error(`RSS fetch failed for ${feedUrl}: ${res.status}`);
+  if (!res.ok) throw new Error(`direct fetch failed: ${res.status}`);
   const xml = await res.text();
 
   const parser = new XMLParser({ ignoreAttributes: true });
   const parsed = parser.parse(xml) as { rss?: { channel?: { item?: RssItem | RssItem[] } } };
   const rawItems = parsed.rss?.channel?.item;
   const items = Array.isArray(rawItems) ? rawItems : rawItems ? [rawItems] : [];
+  if (items.length === 0) throw new Error("direct fetch returned no items");
   return items.slice(0, limit);
+}
+
+interface Rss2JsonItem {
+  title?: string;
+  link?: string;
+  description?: string;
+  content?: string;
+}
+
+interface Rss2JsonResponse {
+  status: string;
+  message?: string;
+  items?: Rss2JsonItem[];
+}
+
+async function fetchFeedItemsViaProxy(feedUrl: string, limit: number): Promise<RssItem[]> {
+  const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}&count=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`rss2json fetch failed: ${res.status}`);
+  const json = (await res.json()) as Rss2JsonResponse;
+  if (json.status !== "ok") throw new Error(`rss2json couldn't parse feed: ${json.message || "unknown error"}`);
+  return (json.items ?? []).slice(0, limit).map((it) => ({
+    title: it.title,
+    link: it.link,
+    description: it.description,
+    "content:encoded": it.content,
+  }));
+}
+
+async function fetchFeedItems(feedUrl: string, limit: number): Promise<RssItem[]> {
+  try {
+    return await fetchFeedItemsDirect(feedUrl, limit);
+  } catch (directErr) {
+    try {
+      return await fetchFeedItemsViaProxy(feedUrl, limit);
+    } catch (proxyErr) {
+      const directMsg = directErr instanceof Error ? directErr.message : String(directErr);
+      const proxyMsg = proxyErr instanceof Error ? proxyErr.message : String(proxyErr);
+      throw new Error(`RSS fetch failed for ${feedUrl} (direct: ${directMsg}; proxy fallback: ${proxyMsg})`);
+    }
+  }
 }
 
 const EXTRACT_SYSTEM_PROMPT = `You are Priora's news-to-company extractor. You'll get the title and a text snippet of one article from an African tech news publication. Decide whether the article is substantively ABOUT one specific real company or startup — not a passing mention, not generic industry commentary, not a "top N" listicle covering many companies at once.
