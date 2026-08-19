@@ -1,9 +1,10 @@
+import { LogoutButton } from "../../components/admin/LogoutButton";
 import { getAnalyticsSummary } from "../../lib/db/analytics";
 
 /**
  * Phase 2 — Usage Analytics Dashboard (see docs/analytics.md). Gated by
- * proxy.ts (HTTP Basic Auth against ADMIN_SECRET), not by anything in
- * this component.
+ * proxy.ts (a real login page + session cookie against ADMIN_SECRET),
+ * not by anything in this component.
  *
  * Simpler than the spec's literal "backend builds the data pipeline,
  * frontend builds the view" split: this is a Server Component that
@@ -217,19 +218,22 @@ export default async function AnalyticsPage({
               conversion funnel.
             </p>
           </div>
-          <nav className="flex gap-2" aria-label="Time period">
-            {PERIODS.map((p) => (
-              <a
-                key={p}
-                href={`/admin/analytics?days=${p}`}
-                className={`font-body rounded-full px-4 py-1.5 text-sm transition ${
-                  p === days ? "bg-ink text-surface" : "bg-ink/5 text-ink-soft hover:bg-ink/10"
-                }`}
-              >
-                {p}d
-              </a>
-            ))}
-          </nav>
+          <div className="flex items-center gap-4">
+            <nav className="flex gap-2" aria-label="Time period">
+              {PERIODS.map((p) => (
+                <a
+                  key={p}
+                  href={`/admin/analytics?days=${p}`}
+                  className={`font-body rounded-full px-4 py-1.5 text-sm transition ${
+                    p === days ? "bg-ink text-surface" : "bg-ink/5 text-ink-soft hover:bg-ink/10"
+                  }`}
+                >
+                  {p}d
+                </a>
+              ))}
+            </nav>
+            <LogoutButton />
+          </div>
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">

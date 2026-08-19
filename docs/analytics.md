@@ -23,12 +23,16 @@ founder idea text longer than the request needs it.
 
 ## Where to see it
 
-`/admin/analytics` — a real page, gated by `proxy.ts` (Next.js 16
-renamed `middleware.ts` to `proxy.ts`; see that file's own doc comment)
-via HTTP Basic Auth. Username can be anything, password is
-`ADMIN_SECRET` — same secret the `/api/admin/*` routes use via Bearer
-token, just applied through the browser-native auth prompt since this
-is a page someone visits rather than an API a script calls.
+`/admin/analytics` — a real page, gated by `proxy.ts`. Visiting it
+without a valid session redirects to `/admin/login`, a styled page (not
+the raw browser Basic-Auth popup) that asks for `ADMIN_SECRET` — same
+secret the `/api/admin/*` routes use via Bearer token, just proved a
+different way since this is a page someone visits rather than an API a
+script calls. On success it sets an httpOnly session cookie (see
+`app/lib/admin-session.ts` — the cookie holds a derived HMAC, never the
+raw secret) that `proxy.ts` checks on every `/admin/*` request. This
+gate only covers `/admin/*` — the public site and `/api/*` are
+untouched. `LogoutButton` (top-right on the dashboard) clears it.
 
 Shows, for a selectable trailing window (7/30/90 days):
 
