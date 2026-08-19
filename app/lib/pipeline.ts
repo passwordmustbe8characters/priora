@@ -308,9 +308,10 @@ async function liveSearchAndMatch(
 
 export async function runVerdictPipeline(
   rawIdea: string,
-  debug?: { cacheHit?: boolean; upsertResult?: UpsertResult },
+  debug?: { cacheHit?: boolean; upsertResult?: UpsertResult; categoryTags?: string[] },
 ): Promise<VerdictResponse> {
   const normalized = await normalizeIdea(rawIdea);
+  if (debug) debug.categoryTags = normalized.categoryTags;
 
   const cached = await findFreshCandidates(normalized.categoryTags, 10);
 

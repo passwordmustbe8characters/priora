@@ -90,3 +90,54 @@ export const companies = pgTable(
 
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
+
+/**
+ * Phase 2 — Usage Analytics Dashboard (see docs/analytics.md).
+ *
+ * One row per POST /api/verdict call. Deliberately does NOT store the
+ * raw idea text — this is for spotting aggregate category/outcome
+ * patterns, not tracking individual submissions, and there's no reason
+ * to hold onto potentially sensitive founder idea text longer than the
+ * request needs it.
+ *
+ * cacheStatus/verdictStatus are plain text, not enums, on purpose — same
+ * reasoning as companies.customerType/companyStage: these values are
+ * read off route.ts's own existing string literals (X-Cache header
+ * values, VerdictStatus), and an enum would force a migration the
+ * moment either set of literals changes. outcome IS the one thing this
+ * table owns itself, but kept as text too for the same forward-
+ * compatibility reason.
+ */
+export const verdictEvents = pgTable(
+  "verdict_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+    // Null when the request never reached the normalizer (validation_error).
+    categoryTags: text("category_tags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+
+    // 'HIT' (Phase 1 in-memory cache) | 'COMPANY-DB-HIT' | 'MISS' | null
+    // (never reached the pipeline's cache check)
+    cacheStatus: text("cache_status"),
+
+    // 'exists' | 'partial_overlap' | 'no_clear_match' | null (errored
+    // before a verdict was produced)
+    verdictStatus: text("verdict_status"),
+
+    // 'success' | 'validation_error' | 'pipeline_error' — this is the
+    // free-to-verdict conversion funnel: did a submitted idea actually
+    // make it to a verdict, or fall out somewhere first.
+    outcome: text("outcome").notNull(),
+  },
+  (table) => [
+    index("verdict_events_created_at_idx").on(table.createdAt),
+    index("verdict_events_category_tags_idx").using("gin", table.categoryTags),
+  ],
+);
+
+export type VerdictEvent = typeof verdictEvents.$inferSelect;
+export type NewVerdictEvent = typeof verdictEvents.$inferInsert;
