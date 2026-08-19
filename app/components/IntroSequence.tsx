@@ -136,12 +136,12 @@ export function IntroSequence({ onDone }: { onDone: () => void }) {
 
       {!audioUnlocked && !isTouch && cursor && (
         <div
-          className="pointer-events-none fixed z-10 flex -translate-x-1/2 translate-y-5 items-center gap-2"
+          className="pointer-events-none fixed z-10 flex -translate-x-1/2 translate-y-7 items-center gap-3"
           style={{ left: cursor.x, top: cursor.y }}
           aria-hidden
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 backdrop-blur-sm">
-            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/25 backdrop-blur-sm">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6 text-white">
               <path
                 d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4Z"
                 fill="currentColor"
@@ -154,7 +154,7 @@ export function IntroSequence({ onDone }: { onDone: () => void }) {
               />
             </svg>
           </span>
-          <span className="font-body text-xs whitespace-nowrap text-white/60">Click for sound</span>
+          <span className="font-body text-base whitespace-nowrap text-white/80">Click for sound</span>
         </div>
       )}
     </div>
