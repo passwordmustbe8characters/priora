@@ -7,6 +7,7 @@ import { SearchBar } from "./components/SearchBar";
 import { BouncingCircles } from "./components/BouncingCircles";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { IntroSequence } from "./components/IntroSequence";
+import { useIsTouchDevice } from "./lib/useIsTouchDevice";
 import { useVerdictFlow } from "./lib/useVerdictFlow";
 
 type Theme = "light" | "dark";
@@ -14,17 +15,40 @@ type Theme = "light" | "dark";
 export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [introDone, setIntroDone] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // Only tracks the *manual* open/close (desktop's "Read more" /
+  // "Close") — panelOpen below also folds in the mobile auto-open, as a
+  // derived value rather than something synced into this state via an
+  // effect (an effect just to mirror one condition into state is the
+  // exact "you might not need an effect" case, and cascades an extra
+  // render for no benefit over computing it directly).
+  const [manuallyOpened, setManuallyOpened] = useState(false);
   const flow = useVerdictFlow();
+  const isMobile = useIsTouchDevice();
 
-  // Both the circles' keepout zone and the search bar's own morph read
-  // this same condition, so they grow in sync.
-  const expanded = flow.phase === "loading" || flow.phase === "result" || flow.phase === "error";
+  const searching = flow.phase === "loading" || flow.phase === "result" || flow.phase === "error";
+  // The circles' keepout zone still grows regardless of device — harmless
+  // even once the panel covers it. The search card's own in-place morph
+  // is mobile-suppressed though: on a small screen there isn't room for
+  // both a morphed card AND a full-screen panel, so mobile skips
+  // straight to the panel (below) instead of showing the card first.
+  const searchExpanded = !isMobile && searching;
+  // Mobile: the search card never visually expands (searchExpanded is
+  // always false there), so the panel has to be the one place results
+  // actually show up — open the instant a search starts, not just after
+  // a "Read more" tap (which, on mobile, never even renders).
+  const panelOpen = manuallyOpened || (isMobile && searching);
 
   const handleReset = () => {
     flow.reset();
-    setPanelOpen(false);
+    setManuallyOpened(false);
   };
+
+  // The fixed header sits above everything, including the results panel
+  // (bg-foreground) once it's open — Wordmark has no color of its own,
+  // it inherits, so without this it'd render foreground-on-foreground
+  // and disappear the instant the panel slides in. Match whichever
+  // surface is actually behind it.
+  const headerOnInvertedSurface = searchExpanded || panelOpen;
 
   return (
     <div
@@ -37,11 +61,15 @@ export default function Home() {
           everything else; the keepout zone they compute internally is
           what keeps the center clear for the search card, and grows
           in step with it once a search is submitted. */}
-      <BouncingCircles expanded={expanded} />
+      <BouncingCircles expanded={searching} />
 
       {/* Fixed above the sliding results panel (higher z-index) so the
           theme toggle stays reachable no matter what's open. */}
-      <header className="fixed inset-x-0 top-0 z-40 flex items-center justify-between px-6 pt-6 sm:px-10 sm:pt-8">
+      <header
+        className={`fixed inset-x-0 top-0 z-40 flex items-center justify-between px-6 pt-6 transition-colors duration-500 sm:px-10 sm:pt-8 ${
+          headerOnInvertedSurface ? "text-background" : "text-foreground"
+        }`}
+      >
         <Wordmark />
         <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "light" ? "dark" : "light")} />
       </header>
@@ -57,15 +85,28 @@ export default function Home() {
           result={flow.result}
           errorMessage={flow.errorMessage}
           lastIdea={flow.lastIdea}
+          expanded={searchExpanded}
           onActivate={flow.activate}
           onCancel={flow.cancel}
           onSubmit={flow.submit}
-          onReadMore={() => setPanelOpen(true)}
+          onReadMore={() => setManuallyOpened(true)}
           onReset={handleReset}
         />
       </div>
 
-      <ResultsPanel open={panelOpen} result={flow.result} onClose={() => setPanelOpen(false)} />
+      <ResultsPanel
+        open={panelOpen}
+        phase={flow.phase}
+        result={flow.result}
+        errorMessage={flow.errorMessage}
+        // Mobile has no separate compact card to fall back to — closing
+        // the panel there is closing the only results surface that
+        // exists, so it resets the whole search rather than leaving a
+        // orphaned "result" state with nothing showing it. Desktop just
+        // hides the panel; the in-place card is still right there.
+        onClose={isMobile ? handleReset : () => setManuallyOpened(false)}
+        onRetry={() => flow.submit(flow.lastIdea)}
+      />
     </div>
   );
 }

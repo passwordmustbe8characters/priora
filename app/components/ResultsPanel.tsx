@@ -1,24 +1,38 @@
 "use client";
 
+import type { Phase } from "../lib/useVerdictFlow";
 import type { VerdictResponse } from "../lib/verdict";
 import { VerdictDetail } from "./VerdictDetail";
+import { VerdictSkeleton } from "./VerdictSkeleton";
 
 /**
- * The "Read more" destination — slides in from the right over the whole
- * screen. Uses the same foreground/background token pair as the search
- * card, so it flips with the light/dark theme toggle too (this is the
- * "results page" the toggle needs to reach). Read-only: editing and
- * follow-up queries happen back in the search card itself, this just
- * shows a bit more detail on the same matches.
+ * Slides in from the right over the whole screen. Uses the same
+ * foreground/background token pair as the search card, so it flips
+ * with the light/dark theme toggle too (this is the "results page" the
+ * toggle needs to reach). Read-only: editing a query happens back in
+ * the search card itself (desktop) — this shows a bit more detail on
+ * the same matches, plus (on mobile, where the search card never
+ * visually expands — see page.tsx) the loading/error states directly,
+ * since this becomes the ONLY results surface there.
+ *
+ * Padding is deliberately much tighter on mobile (`py-6` vs `sm:py-24`)
+ * — the generous desktop whitespace read as "cramped into a small box"
+ * on a short mobile viewport instead of a true full-screen surface.
  */
 export function ResultsPanel({
   open,
+  phase,
   result,
+  errorMessage,
   onClose,
+  onRetry,
 }: {
   open: boolean;
+  phase: Phase;
   result: VerdictResponse | null;
+  errorMessage: string | null;
   onClose: () => void;
+  onRetry: () => void;
 }) {
   return (
     <div
@@ -27,7 +41,7 @@ export function ResultsPanel({
       }`}
       aria-hidden={!open}
     >
-      <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 py-20 sm:px-8 sm:py-24">
+      <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 py-6 sm:px-8 sm:py-24">
         <button
           type="button"
           onClick={onClose}
@@ -46,7 +60,22 @@ export function ResultsPanel({
           </svg>
         </button>
 
-        <div className="mt-6 min-h-0 flex-1 overflow-y-auto">{result && <VerdictDetail result={result} />}</div>
+        <div className="mt-6 min-h-0 flex-1 overflow-y-auto">
+          {phase === "loading" && <VerdictSkeleton />}
+          {phase === "result" && result && <VerdictDetail result={result} />}
+          {phase === "error" && (
+            <div className="flex h-full flex-col items-start justify-center gap-3">
+              <p className="font-body text-background/70">{errorMessage}</p>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="font-body cursor-pointer rounded-full bg-background px-5 py-2 text-sm font-semibold text-foreground transition hover:opacity-90"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

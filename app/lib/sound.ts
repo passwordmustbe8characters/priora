@@ -27,16 +27,18 @@ export function primeAudio() {
   getCtx();
 }
 
-/** A mechanical typewriter key strike: a sharp high "clack" transient
- * (type-bar hitting the platen) plus a lower, slightly longer "thunk"
- * underneath (the mechanism/frame resonance) — two layered noise
- * bursts instead of one soft tick, for a more physical feel. */
+/** A mechanical-keyboard key click: a bright, short primary transient
+ * (the switch's tactile snap) plus a faint, slightly-delayed secondary
+ * tick a few milliseconds later (the release/rebound) — sharper and
+ * much shorter than a typewriter's heavier clack+thunk, with no low-end
+ * "thunk" weight, closer to a Cherry-MX-style switch than a platen
+ * strike. */
 export function playTypeTick() {
   const ctx = getCtx();
   if (!ctx) return;
   const now = ctx.currentTime;
 
-  const bufferSize = Math.floor(ctx.sampleRate * 0.05);
+  const bufferSize = Math.floor(ctx.sampleRate * 0.02);
   const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
   const data = buffer.getChannelData(0);
   for (let i = 0; i < bufferSize; i++) {
@@ -45,36 +47,37 @@ export function playTypeTick() {
   const noise = ctx.createBufferSource();
   noise.buffer = buffer;
 
-  // The clack: short, high, sharp.
-  const clack = ctx.createBiquadFilter();
-  clack.type = "bandpass";
-  clack.frequency.value = 3200 + Math.random() * 600;
-  clack.Q.value = 2.2;
+  // The click: bright, short, high.
+  const click = ctx.createBiquadFilter();
+  click.type = "bandpass";
+  click.frequency.value = 4200 + Math.random() * 1000;
+  click.Q.value = 3;
 
-  const clackGain = ctx.createGain();
-  clackGain.gain.setValueAtTime(0.2, now);
-  clackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+  const clickGain = ctx.createGain();
+  clickGain.gain.setValueAtTime(0.17, now);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.012);
 
-  // The thunk: lower, a touch longer, gives it weight.
-  const thunk = ctx.createBiquadFilter();
-  thunk.type = "bandpass";
-  thunk.frequency.value = 450 + Math.random() * 100;
-  thunk.Q.value = 1.4;
+  // The rebound: fainter, a touch lower, arrives a few ms after the click.
+  const rebound = ctx.createBiquadFilter();
+  rebound.type = "bandpass";
+  rebound.frequency.value = 2600 + Math.random() * 500;
+  rebound.Q.value = 2.5;
 
-  const thunkGain = ctx.createGain();
-  thunkGain.gain.setValueAtTime(0.13, now + 0.004);
-  thunkGain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+  const reboundGain = ctx.createGain();
+  reboundGain.gain.setValueAtTime(0.0001, now);
+  reboundGain.gain.setValueAtTime(0.09, now + 0.006);
+  reboundGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
 
-  noise.connect(clack);
-  clack.connect(clackGain);
-  clackGain.connect(ctx.destination);
+  noise.connect(click);
+  click.connect(clickGain);
+  clickGain.connect(ctx.destination);
 
-  noise.connect(thunk);
-  thunk.connect(thunkGain);
-  thunkGain.connect(ctx.destination);
+  noise.connect(rebound);
+  rebound.connect(reboundGain);
+  reboundGain.connect(ctx.destination);
 
   noise.start(now);
-  noise.stop(now + 0.05);
+  noise.stop(now + 0.02);
 }
 
 /** An airplane-flyby-style whoosh for the intro's swipe-up: a broadband

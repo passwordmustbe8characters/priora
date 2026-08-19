@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useIsTouchDevice } from "../lib/useIsTouchDevice";
 import { playSwoosh, playTypeTick, primeAudio } from "../lib/sound";
 
 const COPY =
@@ -16,27 +17,33 @@ function rand(min: number, max: number) {
  * rather than a perfectly uniform machine cadence — longer at word and
  * punctuation boundaries, a bit of random jitter on ordinary letters. */
 function nextDelay(char: string) {
-  if (char === " ") return rand(140, 220);
-  if (",.—".includes(char)) return rand(220, 320);
-  return rand(90, 170);
+  if (char === " ") return rand(110, 175);
+  if (",.—".includes(char)) return rand(175, 255);
+  return rand(70, 130);
 }
 
 /**
  * First thing rendered on load: a black screen that types out a short
  * definition of Priora (hero-sized, matching the old headline's weight),
- * at a deliberately uneven one-hand-typing pace with a mechanical
- * typewriter clack per character, then an airplane-style whoosh as it
- * swipes up to reveal the page underneath. A muted-speaker icon follows
- * the cursor with a "click for sound" hint until the first click/keypress
- * unlocks audio (browsers block sound before any user gesture), then it
- * disappears. Calls `onDone` once the swipe finishes so the parent can
- * stop rendering this entirely rather than just hiding it.
+ * at a deliberately uneven one-hand-typing pace with a mechanical-
+ * keyboard click per character, then an airplane-style whoosh as it
+ * swipes up to reveal the page underneath. A muted-speaker icon gives a
+ * "sound" hint until the first click/tap/keypress unlocks audio
+ * (browsers block sound before any user gesture) — on a mouse it
+ * follows the cursor, since a coarse (touch) pointer has no cursor to
+ * follow, that case gets a fixed, explicitly tappable icon instead.
+ * Calls `onDone` once the swipe finishes so the parent can stop
+ * rendering this entirely rather than just hiding it.
  */
 export function IntroSequence({ onDone }: { onDone: () => void }) {
   const [typed, setTyped] = useState("");
   const [swiping, setSwiping] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+  // Touch devices have no persistent cursor to follow, so the hint
+  // there is a fixed, tappable icon instead of one that chases a
+  // pointer that doesn't exist.
+  const isTouch = useIsTouchDevice();
 
   // Browsers block audio until a real user gesture — this grabs the
   // earliest possible one so sound has the best chance of being live by
@@ -107,7 +114,27 @@ export function IntroSequence({ onDone }: { onDone: () => void }) {
         <span className="ml-1 inline-block h-[0.85em] w-[0.06em] animate-pulse bg-white align-middle" aria-hidden />
       </p>
 
-      {cursor && !audioUnlocked && (
+      {!audioUnlocked && isTouch && (
+        <button
+          type="button"
+          onClick={() => {
+            primeAudio();
+            setAudioUnlocked(true);
+          }}
+          aria-label="Tap for sound"
+          className="fixed bottom-12 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2"
+        >
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-lg">
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-black">
+              <path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4Z" fill="currentColor" />
+              <path d="M16.5 9.5l4 4m0-4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="font-body text-xs text-white/70">Tap for sound</span>
+        </button>
+      )}
+
+      {!audioUnlocked && !isTouch && cursor && (
         <div
           className="pointer-events-none fixed z-10 flex -translate-x-1/2 translate-y-5 items-center gap-2"
           style={{ left: cursor.x, top: cursor.y }}

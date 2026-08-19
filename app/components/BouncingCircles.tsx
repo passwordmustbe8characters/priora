@@ -3,9 +3,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { QUOTES } from "../lib/quotes";
 
-const CIRCLE_COUNT = 50;
+const CIRCLE_COUNT = 50; // rendered DOM element count — constant across SSR/client, see the mobile-count note below
+const MOBILE_CIRCLE_COUNT = 40; // fewer on small screens so they don't crowd the header — see seeding below
 const MAX_SPEED = 0.5; // px/frame — "excited but not too fast"
+const MAX_TILT_SPEED = MAX_SPEED * 3; // velocity cap while device-tilt is actively pushing bodies around
+const TILT_FORCE = 0.01; // px/frame² per full-tilt (±90°) — tuned to feel responsive without being twitchy
 const EDGE_MARGIN = 6;
+const TOP_MARGIN_DESKTOP = 96; // clears the fixed header (logo + theme toggle) with room to spare
+const TOP_MARGIN_MOBILE = 108; // header content is proportionally taller relative to a small viewport
 const KEEPOUT_LERP = 0.06; // how fast the keepout zone eases toward its target size
 const HOVER_LERP = 0.1; // how fast a circle's "hover amount" eases toward 0 or 1 — roughly matches the 500ms CSS grow/shrink so physics and visuals stay in sync
 const HOVER_EPS = 0.01; // below this, treat hover amount as settled (snap to the resting value)
@@ -51,6 +56,16 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
   const expandedRef = useRef(expanded);
   const reducedMotionRef = useRef(false);
   const readyRef = useRef(false);
+  // beta = front/back tilt (-180..180), gamma = left/right tilt (-90..90).
+  // Stays {0,0} — a harmless no-op — on any device/browser that never
+  // fires deviceorientation (most desktops), so this needs no separate
+  // touch/desktop branch of its own.
+  const tiltRef = useRef({ beta: 0, gamma: 0 });
+  // How close a circle's center may get to y=0 before bouncing back down
+  // — keeps every circle (not just newly-seeded ones) clear of the
+  // fixed header, rather than just avoiding it at spawn time. Set once
+  // seeding determines desktop vs. mobile sizing.
+  const topMarginRef = useRef(TOP_MARGIN_DESKTOP);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   // Radius is seeded once and never changes after — it's safe (and,
@@ -58,6 +73,13 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
   // lives in state rather than the fast-mutating physics ref. Reading a
   // ref's .current during render is exactly what react-hooks/refs flags,
   // and rightly so here — bodiesRef changes every animation frame.
+  //
+  // Mobile gets fewer *visible* circles, but the DOM element count
+  // (CIRCLE_COUNT, used below in the render loop) stays fixed across
+  // SSR and client to avoid a hydration mismatch — ids beyond the
+  // screen-appropriate count just seed with radius 0 and sit parked
+  // off-screen, invisible and inert, rather than not being rendered at
+  // all.
   const [radii, setRadii] = useState<number[]>([]);
 
   useEffect(() => {
@@ -103,15 +125,24 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
       const small = width < 520;
       const minR = small ? 18 : 26;
       const maxR = small ? 42 : 70;
+      const activeCount = small ? MOBILE_CIRCLE_COUNT : CIRCLE_COUNT;
+      const topMargin = small ? TOP_MARGIN_MOBILE : TOP_MARGIN_DESKTOP;
+      topMarginRef.current = topMargin;
 
       const bodies: CircleBody[] = Array.from({ length: CIRCLE_COUNT }, (_, id) => {
+        if (id >= activeCount) {
+          // Parked: zero size, off-screen, zero velocity — takes up the
+          // DOM slot (for hydration-safe, constant element count) but
+          // is otherwise completely inert and invisible.
+          return { id, radius: 0, x: -1000, y: -1000, vx: 0, vy: 0, hovered: false, hoverT: 0 };
+        }
         const radius = rand(minR, maxR);
         let x = 0;
         let y = 0;
         let tries = 0;
         do {
           x = rand(radius + EDGE_MARGIN, sizeRef.current.width - radius - EDGE_MARGIN);
-          y = rand(radius + EDGE_MARGIN, sizeRef.current.height - radius - EDGE_MARGIN);
+          y = rand(radius + topMargin, sizeRef.current.height - radius - EDGE_MARGIN);
           tries++;
         } while (isInsideKeepout(x, y, radius) && tries < 40);
         const angle = rand(0, Math.PI * 2);
@@ -132,6 +163,42 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
 
   useEffect(() => {
     reducedMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }, []);
+
+  // Device-tilt input — nudges every non-frozen body a little each frame
+  // in whichever direction the phone is tilted. iOS requires an explicit
+  // user gesture before it'll grant motion-sensor permission, so that
+  // case waits for the first tap; everywhere else (Android, desktops
+  // that happen to fire the event, or just don't at all) can listen
+  // immediately since there's nothing to ask permission for.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("DeviceOrientationEvent" in window)) return;
+
+    function handleOrientation(e: DeviceOrientationEvent) {
+      tiltRef.current = { beta: e.beta ?? 0, gamma: e.gamma ?? 0 };
+    }
+
+    const RequestPermission = (
+      DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<"granted" | "denied"> }
+    ).requestPermission;
+
+    if (typeof RequestPermission === "function") {
+      const onFirstGesture = () => {
+        RequestPermission()
+          .then((state) => {
+            if (state === "granted") window.addEventListener("deviceorientation", handleOrientation);
+          })
+          .catch(() => {});
+      };
+      window.addEventListener("pointerdown", onFirstGesture, { once: true });
+      return () => {
+        window.removeEventListener("pointerdown", onFirstGesture);
+        window.removeEventListener("deviceorientation", handleOrientation);
+      };
+    }
+
+    window.addEventListener("deviceorientation", handleOrientation);
+    return () => window.removeEventListener("deviceorientation", handleOrientation);
   }, []);
 
   // Animation loop — positions are applied via direct DOM mutation
@@ -171,9 +238,23 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
           else if (b.hoverT > 1 - HOVER_EPS) b.hoverT = 1;
         }
 
+        const tiltAx = (tiltRef.current.gamma / 90) * TILT_FORCE;
+        const tiltAy = (tiltRef.current.beta / 90) * TILT_FORCE;
+
         for (const b of bodies) {
           const frozen = b.hovered || b.hoverT > 0;
           if (frozen) continue;
+
+          if (tiltAx !== 0 || tiltAy !== 0) {
+            b.vx += tiltAx;
+            b.vy += tiltAy;
+            const speed = Math.hypot(b.vx, b.vy);
+            if (speed > MAX_TILT_SPEED) {
+              b.vx = (b.vx / speed) * MAX_TILT_SPEED;
+              b.vy = (b.vy / speed) * MAX_TILT_SPEED;
+            }
+          }
+
           b.x += b.vx;
           b.y += b.vy;
 
@@ -185,8 +266,8 @@ export function BouncingCircles({ expanded = false }: { expanded?: boolean }) {
             b.x = width - b.radius;
             b.vx = -Math.abs(b.vx);
           }
-          if (b.y - b.radius < 0) {
-            b.y = b.radius;
+          if (b.y - b.radius < topMarginRef.current) {
+            b.y = topMarginRef.current + b.radius;
             b.vy = Math.abs(b.vy);
           }
           if (b.y + b.radius > height) {

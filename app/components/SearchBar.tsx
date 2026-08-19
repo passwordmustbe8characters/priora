@@ -14,12 +14,17 @@ import { VerdictSkeleton } from "./VerdictSkeleton";
  * it) showing the same compact results grid as the card's own preview,
  * plus a "Read more" button that hands off to the side panel for a
  * more detailed look at the same matches.
+ *
+ * `expanded` is a prop, not derived from `phase` internally — page.tsx
+ * forces it false on mobile, where the full-screen panel takes over
+ * directly instead of this card ever growing (no room for both).
  */
 export function SearchBar({
   phase,
   result,
   errorMessage,
   lastIdea,
+  expanded,
   onActivate,
   onCancel,
   onSubmit,
@@ -30,6 +35,7 @@ export function SearchBar({
   result: VerdictResponse | null;
   errorMessage: string | null;
   lastIdea: string;
+  expanded: boolean;
   onActivate: () => void;
   onCancel: () => void;
   onSubmit: (idea: string) => void;
@@ -39,7 +45,6 @@ export function SearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
   const active = phase !== "idle";
-  const expanded = phase === "loading" || phase === "result" || phase === "error";
   const canSubmit = phase !== "loading";
 
   useEffect(() => {
@@ -109,7 +114,7 @@ export function SearchBar({
               if (e.key === "Enter" && canSubmit) submit();
             }}
             placeholder="Tell us your idea - we'll tell you if it exists already"
-            className={`font-body h-14 w-full rounded-full px-6 pr-16 outline-none transition-colors duration-300 ${
+            className={`font-body h-12 w-full rounded-full px-5 pr-14 text-sm outline-none transition-colors duration-300 sm:h-14 sm:px-6 sm:pr-16 sm:text-base ${
               expanded
                 ? "bg-background/10 text-background ring-1 ring-background/15 placeholder:text-background/40 focus:ring-background/30"
                 : "bg-white text-black shadow-[0_8px_40px_rgba(0,0,0,0.18)] ring-1 ring-black/10 placeholder:text-black/45"
@@ -121,7 +126,7 @@ export function SearchBar({
             aria-label="Check if it exists"
             disabled={!canSubmit}
             tabIndex={active ? 0 : -1}
-            className={`absolute top-1/2 right-2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full transition-all duration-300 disabled:opacity-60 ${
+            className={`absolute top-1/2 right-1.5 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full transition-all duration-300 disabled:opacity-60 sm:right-2 sm:h-10 sm:w-10 ${
               expanded ? "bg-background text-foreground" : "bg-black text-white"
             } ${active ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"}`}
           >
