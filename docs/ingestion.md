@@ -62,11 +62,16 @@ connector's `fetch`, not a redesign.
 
 ## Category tagging
 
-Each connector carries over that source's own tags/topics/industries (or,
-for the RSS sources, LLM-extracted tags), lowercased and capped at ~6-8,
-as a best-effort `categoryTags` value. This is deliberately not a
-consistent taxonomy across sources — building one is the separate
-**Category Tagging System** component, not this one's job.
+Each connector fetches its own source's raw tags/topics/genres as-is —
+`runIngestion()` (`app/lib/ingestion/index.ts`) then maps every row's
+tags onto the shared taxonomy (`app/lib/taxonomy.ts`) via
+`normalizeCategoryTags()` (`app/lib/category-tagging.ts`) before
+anything gets upserted. See that file's own doc comment for how
+resolution works (dictionary first, one batched LLM fallback for
+whatever's left). `normalizeIdea()` in `pipeline.ts` — the founder-idea
+side of matching — draws from the exact same taxonomy, enum-constrained
+directly in its own LLM call. Same vocabulary on both sides is what
+makes `findFreshCandidates()`'s tag-overlap cache lookup actually work.
 
 ## Known dedup gap (RSS sources)
 

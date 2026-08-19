@@ -1,6 +1,7 @@
 import { getOpenAI, VERDICT_MODEL } from "./openai";
 import { findFreshCandidates, upsertCompanies, type UpsertResult } from "./db/companies";
 import type { Company } from "./db/schema";
+import { CATEGORY_TAXONOMY } from "./taxonomy";
 import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
 
 /**
@@ -38,15 +39,21 @@ const MIN_CACHED_MATCH_SCORE = 30;
 const NORMALIZE_SYSTEM_PROMPT = `You are Priora's idea normalizer. A founder gives you a raw, possibly rambling description of a startup idea. Extract a structured profile:
 
 1. A clear one-sentence canonical restatement (the "normalized" idea).
-2. 2-5 short lowercase category tags for what kind of product this is (e.g. "fintech", "payments", "edtech", "b2c", "marketplace"). These are used to search a cache of previously-found companies, so keep them broad and standard rather than hyper-specific.
+2. 2-5 category tags for what kind of product this is, chosen ONLY from this fixed list — pick the closest matches, never invent a tag outside it: ${CATEGORY_TAXONOMY.join(", ")}. These are used to search a cache of previously-found companies by tag overlap, so sticking to this shared vocabulary (rather than a synonym like "financial services" instead of "fintech") is what actually makes that matching work.
 3. The core problem being solved, in one sentence.
 4. Who the target user is, in a few words.`;
 
+// enum-constraining categoryTags (not just documenting the list in the
+// prompt) is what actually guarantees canonical output — see
+// app/lib/taxonomy.ts for why a shared vocabulary matters here.
 const NORMALIZE_SCHEMA = {
   type: "object" as const,
   properties: {
     normalizedIdea: { type: "string" as const },
-    categoryTags: { type: "array" as const, items: { type: "string" as const } },
+    categoryTags: {
+      type: "array" as const,
+      items: { type: "string" as const, enum: [...CATEGORY_TAXONOMY] },
+    },
     coreProblem: { type: "string" as const },
     targetUser: { type: "string" as const },
   },

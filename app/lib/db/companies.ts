@@ -1,4 +1,4 @@
-import { and, gt, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { companies, type Company, type NewCompany } from "./schema";
 
@@ -99,4 +99,20 @@ export async function upsertCompanies(rows: NewCompany[]): Promise<UpsertResult>
     }
   }
   return result;
+}
+
+/** Every company's id + current category_tags — used by the Category
+ * Tagging System's backfill (app/lib/backfill.ts) to re-normalize rows
+ * inserted before the shared taxonomy existed. */
+export async function listCompanyTags(limit = 500): Promise<{ id: string; categoryTags: string[] }[]> {
+  const db = getDb();
+  return db.select({ id: companies.id, categoryTags: companies.categoryTags }).from(companies).limit(limit);
+}
+
+/** Overwrites just category_tags for one row — deliberately doesn't
+ * touch last_updated_at. Re-tagging isn't re-verifying the underlying
+ * company data, so it shouldn't reset the cache-freshness clock. */
+export async function updateCategoryTags(id: string, categoryTags: string[]): Promise<void> {
+  const db = getDb();
+  await db.update(companies).set({ categoryTags }).where(eq(companies.id, id));
 }
