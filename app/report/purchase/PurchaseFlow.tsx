@@ -7,24 +7,33 @@ import { useSessionStorageString } from "../../lib/useSessionStorageString";
 
 type Currency = "NGN" | "USD";
 
-const PRICE_DISPLAY: Record<Currency, string> = { NGN: "₦5,000", USD: "$15" };
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 interface StoredSource {
   ideaText: string;
   freeVerdict: VerdictResponse;
 }
 
+type JobStatus = "generating" | "ready" | "failed";
+
+// defaultCurrency is unused while the paid flow (currency switcher) is
+// disabled below — kept in the prop type so the page.tsx caller and this
+// component's signature don't need touching when it's restored.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function PurchaseFlow({ defaultCurrency }: { defaultCurrency: Currency }) {
   const router = useRouter();
 
   const [reportJobId, setReportJobId] = useState<string | null>(null);
-  const [currency, setCurrency] = useState<Currency>(defaultCurrency);
-  const [email, setEmail] = useState("");
-  const [emailTouched, setEmailTouched] = useState(false);
-  const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // TEMP — payment bypass for testing. Paystack/Resend/Vercel Blob
+  // aren't configured yet, so the real paid flow (currency + email +
+  // /api/payment/initialize, below) is disabled and replaced with a
+  // direct "generate, then download" path against two temporary routes
+  // (/api/report/[jobId]/status, /api/report/[jobId]/pdf) that render
+  // the PDF straight into the response — no payment, no email, no blob
+  // storage needed. To restore the real flow: delete this block and the
+  // two temp API routes, and uncomment the block further down.
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   // Read whatever GetReportButton stashed before navigating here — if
   // it's missing (direct visit, or a stale/cleared tab), there's
@@ -74,6 +83,46 @@ export function PurchaseFlow({ defaultCurrency }: { defaultCurrency: Currency })
     };
   }, [source, reportJobId]);
 
+  // TEMP — polls the status route every few seconds until the report is
+  // ready (or fails), so the download link can appear without a real
+  // payment/webhook/email round trip. Remove alongside the rest of this
+  // bypass once the paid flow is wired up for real.
+  useEffect(() => {
+    if (!reportJobId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/report/${reportJobId}/status`);
+        const data = (await res.json()) as { status?: JobStatus; failureReason?: string | null };
+        if (cancelled) return;
+        if (data.status === "ready" || data.status === "failed") {
+          setJobStatus(data.status);
+          if (data.status === "failed") setStatusError(data.failureReason || "Report generation failed.");
+          return;
+        }
+        setJobStatus("generating");
+        timer = setTimeout(poll, 3000);
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, 3000);
+      }
+    };
+    poll();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [reportJobId]);
+
+  /* --- Real paid flow, disabled for now — see TEMP comment above. ---
+  const [currency, setCurrency] = useState<Currency>(defaultCurrency);
+  const [email, setEmail] = useState("");
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const PRICE_DISPLAY: Record<Currency, string> = { NGN: "₦5,000", USD: "$15" };
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const emailValid = EMAIL_RE.test(email);
   const canPay = Boolean(reportJobId) && emailValid && !paying;
 
@@ -108,6 +157,7 @@ export function PurchaseFlow({ defaultCurrency }: { defaultCurrency: Currency })
       setPaying(false);
     }
   };
+  --- end disabled block --- */
 
   if (notFound) {
     return (
@@ -140,55 +190,35 @@ export function PurchaseFlow({ defaultCurrency }: { defaultCurrency: Currency })
           <li>&middot; Deeper competitor profiles, sourced and verified</li>
           <li>&middot; Pricing benchmarks across the market</li>
           <li>&middot; Market positioning and gap analysis</li>
-          <li>&middot; Delivered as a PDF to your email</li>
+          <li>&middot; Delivered as a downloadable PDF</li>
         </ul>
 
-        <div className="mt-6 flex items-center justify-between rounded-xl border border-ink/10 bg-background px-4 py-3">
-          <span className="font-display text-2xl font-bold text-ink">{PRICE_DISPLAY[currency]}</span>
-          <div className="flex gap-1 rounded-full bg-ink/5 p-1">
-            {(["NGN", "USD"] as const).map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setCurrency(c)}
-                className={`font-body cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition ${
-                  currency === c ? "bg-ink text-surface" : "text-ink-soft hover:text-ink"
-                }`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
+        {error && <p className="font-body mt-4 text-sm text-red-600">{error}</p>}
+        {statusError && <p className="font-body mt-4 text-sm text-red-600">{statusError}</p>}
 
-        <label className="font-body mt-5 block text-sm font-medium text-ink">
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onBlur={() => setEmailTouched(true)}
-            placeholder="you@example.com"
-            className="font-body mt-1.5 h-12 w-full rounded-xl border border-ink/15 bg-background px-4 text-ink outline-none transition focus:border-ink/40"
-          />
-        </label>
-        {emailTouched && email && !emailValid && (
-          <p className="font-body mt-1.5 text-xs text-red-600">Enter a valid email address.</p>
+        {jobStatus === "ready" && reportJobId ? (
+          <a
+            href={`/api/report/${reportJobId}/pdf`}
+            className="font-body mt-6 flex h-12 w-full cursor-pointer items-center justify-center rounded-xl bg-ink text-surface transition hover:opacity-90"
+          >
+            Download report (PDF)
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="font-body mt-6 h-12 w-full cursor-not-allowed rounded-xl bg-ink text-surface opacity-50"
+          >
+            {jobStatus === "failed"
+              ? "Generation failed"
+              : !reportJobId && !error
+                ? "Preparing your report…"
+                : "Generating your report… this can take a minute"}
+          </button>
         )}
 
-        {error && <p className="font-body mt-3 text-sm text-red-600">{error}</p>}
-
-        <button
-          type="button"
-          onClick={pay}
-          disabled={!canPay}
-          className="font-body mt-5 h-12 w-full cursor-pointer rounded-xl bg-ink text-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {paying ? "Redirecting to payment…" : !reportJobId && !error ? "Preparing your report…" : `Pay ${PRICE_DISPLAY[currency]}`}
-        </button>
-
         <p className="font-body mt-4 text-center text-xs text-ink-soft">
-          Your report is emailed to you, usually within a few minutes of payment.
+          Payment is temporarily disabled for testing — this generates and downloads the report directly.
         </p>
       </div>
     </main>
