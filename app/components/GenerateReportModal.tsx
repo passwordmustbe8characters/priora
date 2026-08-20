@@ -145,7 +145,7 @@ export function GenerateReportModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative flex max-h-[88vh] w-full max-w-3xl flex-col overflow-y-auto rounded-3xl bg-surface p-8 sm:p-12">
+      <div className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-y-auto rounded-3xl bg-surface p-6 sm:max-h-[88vh] sm:p-12">
         <button
           type="button"
           onClick={onClose}
@@ -162,7 +162,7 @@ export function GenerateReportModal({
         <p className="font-body mt-2 text-sm text-ink-soft">{result.idea.normalized}</p>
 
         {step === "questions" && (
-          <div className="mt-8 flex flex-col gap-8">
+          <div className="mt-6 flex flex-col gap-6 sm:mt-8 sm:gap-8">
             <div>
               <p className="font-body text-sm font-semibold text-ink">Which market should this focus on?</p>
               <div className="mt-3 grid grid-cols-2 gap-3">
