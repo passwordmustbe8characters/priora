@@ -56,12 +56,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     month: "long",
     day: "numeric",
   });
-  const pdf = await renderReportPdf(report, generatedDateDisplay);
-
-  return new Response(new Uint8Array(pdf), {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": 'attachment; filename="priora-report.pdf"',
-    },
-  });
+  try {
+    const pdf = await renderReportPdf(report, generatedDateDisplay);
+    return new Response(new Uint8Array(pdf), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="priora-report.pdf"',
+      },
+    });
+  } catch (err) {
+    // Without this, a Puppeteer/Chromium failure here throws uncaught
+    // and Vercel's own platform-level 500 takes over — empty body, no
+    // error code, nothing logged from this route's own perspective.
+    // Confirmed live: that's exactly what was happening before this.
+    console.error(`PDF render failed for job ${jobId}:`, err);
+    return Response.json(
+      {
+        error: {
+          code: "PDF_RENDER_FAILED",
+          message: err instanceof Error ? err.message : "Couldn't generate the PDF.",
+        },
+      },
+      { status: 500 },
+    );
+  }
 }
