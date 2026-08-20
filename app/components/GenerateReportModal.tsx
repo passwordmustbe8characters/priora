@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { VerdictResponse } from "../lib/verdict";
+import { ProgressCircle } from "./ProgressCircle";
 
 type Market = "african" | "global";
 type Step = "questions" | "generating" | "ready" | "failed";
@@ -12,6 +13,16 @@ const STAGE_MESSAGE: Record<NonNullable<Stage>, string> = {
   researching: "Researching competitors and market data…",
   synthesizing: "Analyzing patterns and positioning…",
   verifying: "Double-checking every claim against its source…",
+};
+
+// Coarse, not literal — there's no real percentage to report (three
+// discrete stages, not a byte counter), so these are just "roughly how
+// far through" markers for the fill level. The point is a visibly
+// rising fill as stages actually change, not a precise measurement.
+const STAGE_PROGRESS: Record<NonNullable<Stage>, number> = {
+  researching: 0.3,
+  synthesizing: 0.62,
+  verifying: 0.85,
 };
 
 /**
@@ -192,30 +203,34 @@ export function GenerateReportModal({ result, onClose }: { result: VerdictRespon
           </div>
         )}
 
-        {step === "generating" && (
-          <div className="mt-10 flex flex-col items-center py-8 text-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-ink/15 border-t-ink" />
-            <p className="font-body mt-5 text-sm font-medium text-ink">
-              {stage ? STAGE_MESSAGE[stage] : "Getting your report ready…"}
-            </p>
-            <p className="font-body mt-1.5 text-xs text-ink-soft">This usually takes about a minute.</p>
-          </div>
-        )}
-
-        {step === "ready" && reportJobId && (
+        {(step === "generating" || step === "ready") && (
           <div className="mt-10 flex flex-col items-center py-4 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-ink/5">
-              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-ink">
-                <path d="M5 12.5 9.5 17 19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <p className="font-display mt-4 text-xl font-bold text-ink">Your report is ready</p>
-            <a
-              href={`/api/report/${reportJobId}/pdf`}
-              className="font-body mt-6 flex h-12 w-full max-w-xs cursor-pointer items-center justify-center rounded-xl bg-ink text-surface transition hover:opacity-90"
-            >
-              Download report (PDF)
-            </a>
+            {/* Same element across both steps (not two swapped in and
+                out) — that's what lets the fill settle and the
+                checkmark draw in as a continuous motion instead of a
+                cut between two different pieces of UI. */}
+            <ProgressCircle progress={stage ? STAGE_PROGRESS[stage] : 0.08} done={step === "ready"} />
+
+            {step === "generating" ? (
+              <>
+                <p className="font-body mt-5 text-sm font-medium text-ink">
+                  {stage ? STAGE_MESSAGE[stage] : "Getting your report ready…"}
+                </p>
+                <p className="font-body mt-1.5 text-xs text-ink-soft">This usually takes about a minute.</p>
+              </>
+            ) : (
+              reportJobId && (
+                <>
+                  <p className="font-display mt-4 text-xl font-bold text-ink">Your report is ready</p>
+                  <a
+                    href={`/api/report/${reportJobId}/pdf`}
+                    className="font-body mt-6 flex h-12 w-full max-w-xs cursor-pointer items-center justify-center rounded-xl bg-ink text-surface transition hover:opacity-90"
+                  >
+                    Download report (PDF)
+                  </a>
+                </>
+              )
+            )}
           </div>
         )}
 

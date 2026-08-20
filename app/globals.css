@@ -57,6 +57,30 @@ body {
   }
 }
 
+/* Water-fill loader (GenerateReportModal's progress circle) — a wave
+   shape drawn twice side by side, scrolled left by exactly its own
+   width so the loop seams invisibly. Speed is deliberately unhurried
+   (liquid, not a spinner) since the fill *level* is what actually
+   communicates progress; this is just texture on top of it. */
+@keyframes water-wave-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-water-wave {
+  animation: water-wave-scroll 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-water-wave {
+    animation: none;
+  }
+}
+
 /* Content that appears partway through the pill→rectangle morph (the
    back button, the results/skeleton area) fades and settles in rather
    than popping the instant it mounts — makes the whole morph read as
