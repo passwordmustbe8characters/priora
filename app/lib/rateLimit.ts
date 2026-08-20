@@ -57,8 +57,18 @@ export async function checkRateLimit(
   const limiter = getLimiter(name, requests, window);
   if (!limiter) return { allowed: true };
 
-  const ip = ipAddress(request) ?? "unknown";
-  const { success, reset } = await limiter.limit(`${name}:${ip}`);
-  if (success) return { allowed: true };
-  return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((reset - Date.now()) / 1000)) };
+  try {
+    const ip = ipAddress(request) ?? "unknown";
+    const { success, reset } = await limiter.limit(`${name}:${ip}`);
+    if (success) return { allowed: true };
+    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((reset - Date.now()) / 1000)) };
+  } catch (err) {
+    // A Redis-side problem (outage, quota, network blip) must not take
+    // down the endpoint it's supposed to be protecting — that would
+    // turn "abuse protection" into a single point of failure for the
+    // whole public product. Log it, then fail open exactly like the
+    // "not configured" case above.
+    console.error(`rate limit check failed for "${name}", failing open:`, err);
+    return { allowed: true };
+  }
 }
