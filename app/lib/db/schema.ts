@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Phase 2 — Company Database Schema (see docs/db-schema.md).
@@ -141,3 +141,70 @@ export const verdictEvents = pgTable(
 
 export type VerdictEvent = typeof verdictEvents.$inferSelect;
 export type NewVerdictEvent = typeof verdictEvents.$inferInsert;
+
+/**
+ * Phase 3 — the paid deep report (see priora-phase3-spec-for-claude-code.md).
+ *
+ * Deliberately on the same Postgres/Drizzle setup as `companies` and
+ * `verdict_events` — the spec suggested Turso/LibSQL "to stay consistent
+ * across projects," referencing a different project. Standing up a
+ * second database engine for one table isn't worth it when a working
+ * one is already here.
+ *
+ * Exists at all because report generation is a genuine multi-step async
+ * process (generation start → payment → generation finish → email) that
+ * can't safely live only in server memory — a serverless function
+ * freezing or restarting mid-process would silently lose a paid job.
+ * See Payment Webhook Handler (app/lib/report/webhook.ts) for how
+ * `status` and `paymentStatus` resolve the race between the two halves.
+ */
+export const reportStatusEnum = pgEnum("report_status", ["generating", "ready", "failed"]);
+export const paymentStatusEnum = pgEnum("report_payment_status", ["pending", "paid", "failed"]);
+export const reportCurrencyEnum = pgEnum("report_currency", ["NGN", "USD"]);
+
+export const reportJobs = pgTable(
+  "report_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ideaText: text("idea_text").notNull(),
+
+    // The founder's free verdict response in full (idea.normalized,
+    // verdict, matches) — the Deep Report Generator's starting point.
+    // Stored as-is rather than requiring the client to also pass a
+    // separate "normalized_profile" object per the spec's literal
+    // request shape: VerdictResponse.idea.normalized already carries
+    // the clean restatement, and re-deriving category tags (if a
+    // generator step actually needs them) via one more cheap
+    // normalizeIdea() call is simpler than widening the public API
+    // contract just to round-trip an internal profile through the
+    // client. Flagged here as a deliberate deviation, not an oversight.
+    freeVerdict: jsonb("free_verdict").notNull(),
+
+    // Null until Deep Report Generator completes; shape is the
+    // DeepReportContent type in app/lib/report/types.ts.
+    deepReportMatches: jsonb("deep_report_matches"),
+
+    status: reportStatusEnum("status").notNull().default("generating"),
+    paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
+
+    // Null until checkout — Payment Integration sets these.
+    currency: reportCurrencyEnum("currency"),
+    amount: integer("amount"), // smallest currency unit — kobo (NGN) or cents (USD)
+    email: text("email"),
+
+    pdfUrl: text("pdf_url"), // null until Report Document Assembly completes
+
+    // Set whenever status flips to 'failed' — without this, "alert for
+    // manual follow-up" (required by both the Generator and the
+    // Hallucination Verification edge cases) would have nothing to
+    // actually tell a human.
+    failureReason: text("failure_reason"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("report_jobs_status_idx").on(table.status), index("report_jobs_payment_status_idx").on(table.paymentStatus)],
+);
+
+export type ReportJob = typeof reportJobs.$inferSelect;
+export type NewReportJob = typeof reportJobs.$inferInsert;

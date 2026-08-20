@@ -61,14 +61,18 @@ const NORMALIZE_SCHEMA = {
   additionalProperties: false,
 };
 
-interface NormalizeOutput {
+export interface NormalizeOutput {
   normalizedIdea: string;
   categoryTags: string[];
   coreProblem: string;
   targetUser: string;
 }
 
-async function normalizeIdea(rawIdea: string): Promise<NormalizeOutput> {
+// Exported — Phase 3's Deep Report Generator needs this as a standalone,
+// reusable stage (see priora-phase3-spec-for-claude-code.md, Deep Report
+// Trigger's explicit dependency note), not just wired into the free
+// verdict route.
+export async function normalizeIdea(rawIdea: string): Promise<NormalizeOutput> {
   const client = getOpenAI();
   const response = await client.responses.create({
     model: VERDICT_MODEL,
@@ -95,7 +99,9 @@ async function normalizeIdea(rawIdea: string): Promise<NormalizeOutput> {
 // "source" length so one non-compliant response can't break the
 // match-row layout (this is what actually happened once: the model put a
 // full citation into "source" instead of "description").
-function stripMarkdownLinks(text: string): string {
+// Exported — the same discipline applies to any model-generated text
+// field in Phase 3's deep report, not just free-verdict matches.
+export function stripMarkdownLinks(text: string): string {
   return text
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\(\s*https?:\/\/[^\s)]+\s*\)/g, "")

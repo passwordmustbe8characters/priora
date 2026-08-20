@@ -1,3 +1,4 @@
+import { GetReportButton } from "./GetReportButton";
 import type { VerdictResponse } from "../lib/verdict";
 
 /** The side panel's view — same data as the in-place preview card
@@ -53,6 +54,8 @@ export function VerdictDetail({ result }: { result: VerdictResponse }) {
           digging deeper before you commit real time to it.
         </p>
       )}
+
+      <GetReportButton result={result} />
     </div>
   );
 }
