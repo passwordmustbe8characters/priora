@@ -9,8 +9,8 @@ import type { NextRequest } from "next/server";
  * wouldn't reliably survive across serverless invocations/instances;
  * this codebase already learned that lesson the hard way once before).
  *
- * Deliberately fails OPEN (no limiting) when UPSTASH_REDIS_REST_URL/
- * TOKEN aren't set, not closed — this is a different situation from
+ * Deliberately fails OPEN (no limiting) when no Redis credentials are
+ * set, not closed — this is a different situation from
  * app/lib/report/bypassGate.ts's fail-closed default. That gate exists
  * to keep an endpoint restricted; this exists to protect an endpoint
  * that's supposed to stay fully public (/api/verdict is the whole
@@ -18,11 +18,19 @@ import type { NextRequest } from "next/server";
  * configure Upstash" takes down the actual product, which is a worse
  * outcome than temporarily having no abuse protection. Configure it in
  * production; local dev is expected to just run unlimited.
+ *
+ * Accepts both KV_REST_API_URL/TOKEN (what Vercel's own Storage tab ->
+ * Upstash integration actually names them — confirmed live, not
+ * assumed) and UPSTASH_REDIS_REST_URL/TOKEN (Upstash's own naming, for
+ * anyone who set up the database directly instead of through Vercel).
  */
 
+const REDIS_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+
 let redis: Redis | null = null;
-if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-  redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN });
+if (REDIS_URL && REDIS_TOKEN) {
+  redis = new Redis({ url: REDIS_URL, token: REDIS_TOKEN });
 }
 
 const limiters = new Map<string, Ratelimit>();
