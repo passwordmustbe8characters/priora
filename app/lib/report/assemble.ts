@@ -1,6 +1,4 @@
-import { put } from "@vercel/blob";
-import { renderHtmlToPdf } from "./pdf";
-import { renderReportHtml } from "./template";
+import { renderReportPdf } from "./pdf";
 import type { DeepReportContent } from "./types";
 
 /**
@@ -8,29 +6,22 @@ import type { DeepReportContent } from "./types";
  * verified content and produces the final PDF, no new content
  * decisions made here (per spec).
  *
- * Storage: Vercel Blob, not a generic "any S3-compatible bucket" — this
- * app is already Vercel-hosted, so it's the zero-extra-account choice
- * (needs Blob storage enabled on the Vercel project; the
- * BLOB_READ_WRITE_TOKEN env var gets set automatically the same way
- * DATABASE_URL was for Postgres).
- *
- * `access: "public"` for now — simplest to build, matching the spec's
- * own "either [attachment or link] is fine, pick whichever is
- * simpler." The actual delivery mechanism is an email attachment (see
- * email.ts), not this URL — the stored blob is a record/re-send
- * fallback, not the primary access path. Worth revisiting for a
- * private/signed URL if that record needs tighter access later.
+ * No persistent storage — the only delivery mechanism is the email
+ * attachment (email.ts), which uses these bytes directly. An earlier
+ * version also uploaded to Vercel Blob "as a record/re-send fallback,"
+ * but nothing ever actually read that URL — it was a real, unused
+ * external dependency carried for a capability (recovering/re-viewing
+ * a report after the fact) that was never built. Dropped rather than
+ * kept half-wired; add real storage back deliberately if that
+ * capability gets built for real.
  */
-export async function assembleReport(jobId: string, report: DeepReportContent): Promise<{ pdf: Buffer; pdfUrl: string }> {
+export async function assembleReport(report: DeepReportContent): Promise<{ pdf: Buffer }> {
   const generatedDate = new Date(report.generatedAt).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
   });
-  const html = renderReportHtml(report, generatedDate);
-  const pdf = await renderHtmlToPdf(html);
+  const pdf = await renderReportPdf(report, generatedDate);
 
-  const blob = await put(`reports/${jobId}.pdf`, pdf, { access: "public", contentType: "application/pdf" });
-
-  return { pdf, pdfUrl: blob.url };
+  return { pdf };
 }

@@ -209,7 +209,17 @@ export const reportJobs = pgTable(
     amount: integer("amount"), // smallest currency unit — kobo (NGN) or cents (USD)
     email: text("email"),
 
-    pdfUrl: text("pdf_url"), // null until Report Document Assembly completes
+    // Doubles as both "already delivered" and the race guard between
+    // generation-finishes-second and payment-confirms-second both
+    // calling maybeDeliver at nearly the same time (see orchestrate.ts):
+    // claimed via a conditional UPDATE ... WHERE delivery_started_at IS
+    // NULL before any assembly/email work happens, not after, so only
+    // one concurrent caller can ever win the claim — Postgres guarantees
+    // that row-level compare-and-swap is atomic. Replaces an earlier
+    // `pdfUrl` column that stored a Vercel Blob URL nothing ever
+    // actually read (delivery is the email attachment, not a link) —
+    // dropped along with that dependency rather than kept half-wired.
+    deliveryStartedAt: timestamp("delivery_started_at", { withTimezone: true }),
 
     // Set whenever status flips to 'failed' — without this, "alert for
     // manual follow-up" (required by both the Generator and the

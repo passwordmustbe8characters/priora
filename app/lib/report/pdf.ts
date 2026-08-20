@@ -1,3 +1,7 @@
+import { PDFDocument } from "pdf-lib";
+import { renderContentHtml, renderCoverHtml } from "./template";
+import type { DeepReportContent } from "./types";
+
 /**
  * Phase 3 — HTML→PDF rendering. Two Chromium sources, branched by
  * environment:
@@ -10,10 +14,12 @@
  *   what makes it possible to test PDF generation locally on Windows
  *   at all, since @sparticuz/chromium has no Windows binary.
  *
- * Page numbering uses Puppeteer's real `footerTemplate` mechanism, not
- * the spec's CSS `@page { @bottom-center }` rule — see template.ts's
- * doc comment for why (confirmed unsupported by Chromium's print
- * engine, not assumed).
+ * Renders the cover and the rest of the report as two separate PDFs
+ * (one Chromium session, two page.pdf() calls) and merges them with
+ * pdf-lib — see template.ts's doc comment for why this two-pass
+ * approach exists at all (Puppeteer's footerTemplate has no "skip the
+ * first page" option, and that's the only way to get page numbers on
+ * Chromium's print engine at all).
  */
 
 const FOOTER_TEMPLATE = `
@@ -21,44 +27,66 @@ const FOOTER_TEMPLATE = `
     Priora Report &middot; Page <span class="pageNumber"></span> of <span class="totalPages"></span>
   </div>
 `;
+const NO_FOOTER_TEMPLATE = "<div></div>";
+const PDF_MARGIN = { top: "2.2cm", bottom: "2.2cm", left: "2cm", right: "2cm" };
 
-export async function renderHtmlToPdf(html: string): Promise<Buffer> {
+async function launchBrowser(): Promise<import("puppeteer-core").Browser> {
   const isProduction = process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
-
-  let browser: import("puppeteer-core").Browser;
 
   if (isProduction) {
     const [{ default: chromium }, { default: puppeteer }] = await Promise.all([
       import("@sparticuz/chromium"),
       import("puppeteer-core"),
     ]);
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
-  } else {
-    // Dynamic import so the full `puppeteer` devDependency (and its
-    // bundled Chromium download) is never pulled into the production
-    // bundle at all — only ever reached on this branch.
-    const { default: puppeteerFull } = await import("puppeteer");
-    browser = (await puppeteerFull.launch({ headless: true })) as unknown as import("puppeteer-core").Browser;
+    return puppeteer.launch({ args: chromium.args, executablePath: await chromium.executablePath(), headless: true });
   }
 
+  // Dynamic import so the full `puppeteer` devDependency (and its
+  // bundled Chromium download) is never pulled into the production
+  // bundle at all — only ever reached on this branch.
+  const { default: puppeteerFull } = await import("puppeteer");
+  return puppeteerFull.launch({ headless: true }) as unknown as Promise<import("puppeteer-core").Browser>;
+}
+
+async function renderOnePdf(
+  browser: import("puppeteer-core").Browser,
+  html: string,
+  footerTemplate: string,
+): Promise<Uint8Array> {
+  const page = await browser.newPage();
   try {
-    const page = await browser.newPage();
     // "load" is sufficient — the template is self-contained (system
     // fonts only, no external assets), nothing async to wait out.
     await page.setContent(html, { waitUntil: "load" });
-    const pdfBytes = await page.pdf({
+    return await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "2.2cm", bottom: "2.2cm", left: "2cm", right: "2cm" },
+      margin: PDF_MARGIN,
       displayHeaderFooter: true,
       headerTemplate: "<div></div>",
-      footerTemplate: FOOTER_TEMPLATE,
+      footerTemplate,
     });
-    return Buffer.from(pdfBytes);
+  } finally {
+    await page.close();
+  }
+}
+
+export async function renderReportPdf(report: DeepReportContent, generatedDateDisplay: string): Promise<Buffer> {
+  const browser = await launchBrowser();
+  try {
+    const [coverBytes, contentBytes] = await Promise.all([
+      renderOnePdf(browser, renderCoverHtml(report, generatedDateDisplay), NO_FOOTER_TEMPLATE),
+      renderOnePdf(browser, renderContentHtml(report), FOOTER_TEMPLATE),
+    ]);
+
+    const merged = await PDFDocument.create();
+    for (const bytes of [coverBytes, contentBytes]) {
+      const doc = await PDFDocument.load(bytes);
+      const pages = await merged.copyPages(doc, doc.getPageIndices());
+      for (const page of pages) merged.addPage(page);
+    }
+
+    return Buffer.from(await merged.save());
   } finally {
     await browser.close();
   }

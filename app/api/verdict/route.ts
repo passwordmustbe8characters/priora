@@ -2,16 +2,37 @@ import type { NextRequest } from "next/server";
 import { runVerdictPipeline } from "../../lib/pipeline";
 import { getCachedVerdict, setCachedVerdict } from "../../lib/cache";
 import { recordVerdictEvent } from "../../lib/db/analytics";
+import { checkRateLimit } from "../../lib/rateLimit";
 import type { UpsertResult } from "../../lib/db/companies";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // web search + reasoning can take a while
+
+// This is the whole product's public entry point (no auth, no gate) —
+// the limit is sized for a real person trying several related ideas in
+// one sitting, not for scraping it as a bulk research API.
+const RATE_LIMIT_REQUESTS = 12;
+const RATE_LIMIT_WINDOW = "1 h" as const;
 
 function errorResponse(status: number, code: string, message: string, extra?: Record<string, unknown>) {
   return Response.json({ error: { code, message, ...extra } }, { status });
 }
 
 export async function POST(request: NextRequest) {
+  const rateLimit = await checkRateLimit(request, "verdict", RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW);
+  if (!rateLimit.allowed) {
+    return Response.json(
+      {
+        error: {
+          code: "RATE_LIMITED",
+          message: "You've checked a lot of ideas in a short time — try again in a bit.",
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+        },
+      },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds ?? 60) } },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

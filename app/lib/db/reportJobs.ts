@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "./client";
 import { reportJobs, type NewReportJob, type ReportJob } from "./schema";
 import type { VerdictResponse } from "../verdict";
@@ -48,7 +48,6 @@ export async function updateReportJob(
       | "currency"
       | "amount"
       | "email"
-      | "pdfUrl"
       | "failureReason"
       | "deepReportMatches"
       | "stage"
@@ -62,6 +61,21 @@ export async function updateReportJob(
     .where(eq(reportJobs.id, id))
     .returning();
   return row ?? null;
+}
+
+/** Atomic claim for the delivery race guard (see schema.ts's
+ * deliveryStartedAt doc comment) — a conditional UPDATE, not a
+ * read-then-write, so two near-simultaneous callers can't both think
+ * they're first. Returns true only for whichever call actually won the
+ * claim; false means someone else already has it (or already delivered). */
+export async function claimDelivery(id: string): Promise<boolean> {
+  const db = getDb();
+  const [row] = await db
+    .update(reportJobs)
+    .set({ deliveryStartedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(reportJobs.id, id), isNull(reportJobs.deliveryStartedAt)))
+    .returning({ id: reportJobs.id });
+  return Boolean(row);
 }
 
 /** Typed accessor — deepReportMatches is stored as jsonb (no schema

@@ -14,12 +14,15 @@ import { derivePricingBenchmarks, deriveSources } from "./types";
  * template's visual language (Georgia, muted ink) rather than the CSS
  * rule that would silently do nothing.
  *
- * One further, deliberate simplification: the spec's footer is
- * suppressed on the cover page specifically (`@page :first`).
- * Reproducing that with Puppeteer's real footerTemplate mechanism would
- * need a two-pass render (cover alone, then the rest, then merged) —
- * real added complexity for a cosmetic nicety. The footer renders on
- * every page including the cover for now; flagged, not silently done.
+ * The cover page is rendered as its own separate document
+ * (renderCoverHtml) from the rest (renderContentHtml) specifically so
+ * pdf.ts can PDF each with different footer settings and merge them —
+ * Puppeteer's footerTemplate mechanism applies uniformly to every page
+ * of one page.pdf() call, no "skip the first page" option, so getting
+ * the spec's "no footer on the cover" actually required two renders,
+ * not a CSS trick. Page numbers in the footer therefore start at 1 on
+ * the first content page (the cover itself stays unnumbered), which is
+ * the standard convention for this kind of cover+numbered-body report.
  *
  * Every `escapeHtml` call below matters — this template interpolates
  * real founder/company text pulled from the open web, which must never
@@ -105,7 +108,31 @@ function competitorCard(c: CompetitorProfile, escapedNames: string[]): string {
     </div>`;
 }
 
-export function renderReportHtml(report: DeepReportContent, generatedDateDisplay: string): string {
+function documentShell(bodyHtml: string): string {
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>${TEMPLATE_CSS}</style>
+</head>
+<body>
+${bodyHtml}
+</body>
+</html>`;
+}
+
+export function renderCoverHtml(report: DeepReportContent, generatedDateDisplay: string): string {
+  return documentShell(`
+<div class="cover">
+  <div class="kicker">Competitive &amp; Market Report</div>
+  <h1>${escapeHtml(report.ideaOneLiner)}</h1>
+  <div class="sub">Prepared by Priora &middot; Generated ${escapeHtml(generatedDateDisplay)}</div>
+  <div class="rule"></div>
+  <div class="meta">This report is grounded in live search results. Every factual claim links to its source — see Sources &amp; Methodology, final page.</div>
+</div>`);
+}
+
+export function renderContentHtml(report: DeepReportContent): string {
   const directCompetitors = report.competitors.filter((c) => c.category === "direct");
   const adjacentCompetitors = report.competitors.filter((c) => c.category === "adjacent");
   const pricingRows = derivePricingBenchmarks(report.competitors);
@@ -142,22 +169,7 @@ export function renderReportHtml(report: DeepReportContent, generatedDateDisplay
     ? `<ul class="sources-list">${sources.map((s) => `<li><a href="${escapeHtml(s.url)}">${escapeHtml(s.label)}</a></li>`).join("\n")}</ul>`
     : `<p>No external sources were used in this report.</p>`;
 
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<style>${TEMPLATE_CSS}</style>
-</head>
-<body>
-
-<div class="cover">
-  <div class="kicker">Competitive &amp; Market Report</div>
-  <h1>${escapeHtml(report.ideaOneLiner)}</h1>
-  <div class="sub">Prepared by Priora &middot; Generated ${escapeHtml(generatedDateDisplay)}</div>
-  <div class="rule"></div>
-  <div class="meta">This report is grounded in live search results. Every factual claim links to its source — see Sources &amp; Methodology, final page.</div>
-</div>
-
+  return documentShell(`
 <span class="section-tag tag-fact">Sourced fact</span>
 <h2>Executive Summary</h2>
 <p>${prose(report.executiveSummary.text)}</p>
@@ -183,8 +195,5 @@ ${synthesisSectionsHtml}
 
 <h2>Sources &amp; Methodology</h2>
 ${sourcesListHtml}
-<p class="footer-note">Sourced-fact sections are traceable to a specific link. Synthesis sections are Priora's reasoned read of the pattern across sources and should be treated as a hypothesis, not verified data — always clearly labeled, never mixed together.</p>
-
-</body>
-</html>`;
+<p class="footer-note">Sourced-fact sections are traceable to a specific link. Synthesis sections are Priora's reasoned read of the pattern across sources and should be treated as a hypothesis, not verified data — always clearly labeled, never mixed together.</p>`);
 }

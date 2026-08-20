@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { createReportJob } from "../../../lib/db/reportJobs";
 import { runDeepReportPipeline } from "../../../lib/report/orchestrate";
 import { checkReportBypassAccess } from "../../../lib/report/bypassGate";
+import { checkRateLimit } from "../../../lib/rateLimit";
 import type { VerdictResponse } from "../../../lib/verdict";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,13 @@ export const dynamic = "force-dynamic";
 // and this route's own note above maxDuration for the Hobby-plan cap
 // this needs to fit inside regardless of the number configured here.
 export const maxDuration = 60;
+
+// Tighter than /api/verdict's — this runs two real LLM calls with web
+// search plus a verification pass, real money per hit. The bypass key
+// already restricts who can reach this at all in production, but a
+// leaked/shared key shouldn't be able to hammer it either.
+const RATE_LIMIT_REQUESTS = 5;
+const RATE_LIMIT_WINDOW = "1 h" as const;
 
 /**
  * Phase 3 — Deep Report Trigger. Creates the report_jobs row and starts
@@ -31,6 +39,20 @@ export const maxDuration = 60;
  * object — see schema.ts's reportJobs doc comment for the reasoning.
  */
 export async function POST(request: NextRequest) {
+  const rateLimit = await checkRateLimit(request, "report-start", RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW);
+  if (!rateLimit.allowed) {
+    return Response.json(
+      {
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many reports requested in a short time — try again in a bit.",
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+        },
+      },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds ?? 60) } },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

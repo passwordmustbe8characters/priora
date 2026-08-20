@@ -1,4 +1,4 @@
-import { getDeepReportContent, getFreeVerdict, getReportJob, updateReportJob } from "../db/reportJobs";
+import { claimDelivery, getDeepReportContent, getFreeVerdict, getReportJob, updateReportJob } from "../db/reportJobs";
 import { assembleReport } from "./assemble";
 import { sendReportEmail } from "./email";
 import { generateDeepReport } from "./generator";
@@ -14,15 +14,12 @@ import { verifyDeepReport } from "./verify";
  * conditions are actually true, so calling it from both places is safe
  * and is exactly how the race resolves without polling.
  *
- * Known simplification, flagged rather than silently accepted: there's
- * no atomic/transactional guard against `maybeDeliver` running twice
- * concurrently for the same job (e.g. if both triggers fired at nearly
- * the same instant) — a real production system at meaningful
- * concurrency would want a proper DB-level guard (a conditional UPDATE
- * that only succeeds once). Not implemented here given the genuinely
- * narrow real-world window (generation finishing and a webhook firing
- * at the literal same millisecond is rare), but worth hardening before
- * this handles real volume.
+ * Guarded against running twice concurrently for the same job (e.g.
+ * both triggers firing at nearly the same instant) via claimDelivery —
+ * a conditional UPDATE ... WHERE delivery_started_at IS NULL, atomic at
+ * the Postgres row level, so only one of two simultaneous callers can
+ * ever win it. Claimed before any assembly/email work starts, not
+ * after, which is what actually closes the race window.
  */
 
 /** Deep Report Trigger's async pipeline: generate → verify → assemble
@@ -71,7 +68,7 @@ export async function maybeDeliver(jobId: string): Promise<void> {
   if (!job) return;
   if (job.paymentStatus !== "paid") return;
   if (job.status !== "ready") return;
-  if (job.pdfUrl) return; // already delivered
+  if (job.deliveryStartedAt) return; // already delivered, or another caller has the claim
 
   if (!job.email) {
     console.error(`maybeDeliver: job ${jobId} is paid+ready but has no email on file — cannot deliver`);
@@ -84,9 +81,14 @@ export async function maybeDeliver(jobId: string): Promise<void> {
     return;
   }
 
+  // Atomic claim, not a plain flag write — the read above is just a
+  // cheap pre-check to skip the common case; this is what actually
+  // decides the race if two callers reach here at nearly the same time.
+  const won = await claimDelivery(jobId);
+  if (!won) return;
+
   try {
-    const { pdf, pdfUrl } = await assembleReport(jobId, content);
-    await updateReportJob(jobId, { pdfUrl });
+    const { pdf } = await assembleReport(content);
     await sendReportEmail({ to: job.email, ideaOneLiner: content.ideaOneLiner, pdf });
   } catch (err) {
     // Deliberately doesn't flip `status` to 'failed' — generation
@@ -94,6 +96,11 @@ export async function maybeDeliver(jobId: string): Promise<void> {
     // which the spec calls out as its own alert-worthy case rather
     // than conflating with "the research failed." Logged loudly per
     // the spec's "real-money edge case worth being paranoid about."
+    // Also deliberately doesn't release the delivery claim — retrying
+    // automatically risks a duplicate email if the failure happened
+    // after Resend actually sent it (only the DB write after would have
+    // failed); this stays a human-follow-up case, matching the rest of
+    // this function's error handling.
     console.error(`ALERT: delivery failed for paid job ${jobId} (email: ${job.email}):`, err);
   }
 }

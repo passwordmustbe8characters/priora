@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getDeepReportContent, getReportJob } from "../../../../lib/db/reportJobs";
-import { renderReportHtml } from "../../../../lib/report/template";
-import { renderHtmlToPdf } from "../../../../lib/report/pdf";
+import { renderReportPdf } from "../../../../lib/report/pdf";
 import { checkReportBypassAccess } from "../../../../lib/report/bypassGate";
 
 export const dynamic = "force-dynamic";
@@ -48,8 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     month: "long",
     day: "numeric",
   });
-  const html = renderReportHtml(report, generatedDateDisplay);
-  const pdf = await renderHtmlToPdf(html);
+  const pdf = await renderReportPdf(report, generatedDateDisplay);
 
   return new Response(new Uint8Array(pdf), {
     headers: {
