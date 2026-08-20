@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import type { NextRequest } from "next/server";
 import { createReportJob } from "../../../lib/db/reportJobs";
-import { runDeepReportPipeline } from "../../../lib/report/orchestrate";
+import { runGenerationStage } from "../../../lib/report/orchestrate";
 import { checkReportBypassAccess } from "../../../lib/report/bypassGate";
 import { checkRateLimit } from "../../../lib/rateLimit";
 import type { VerdictResponse } from "../../../lib/verdict";
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   const job = await createReportJob(ideaText, freeVerdict as VerdictResponse, { market, painPoint });
 
-  after(() => runDeepReportPipeline(job.id));
+  after(() => runGenerationStage(job.id));
 
   return Response.json({ reportJobId: job.id, status: job.status }, { status: 201 });
 }

@@ -62,9 +62,10 @@ export async function POST(request: NextRequest) {
   } else if (job.status === "ready") {
     after(() => maybeDeliver(reportJobId));
   }
-  // status === "generating": nothing more to do here — the original
-  // runDeepReportPipeline call (from /api/report/start) will call
-  // maybeDeliver itself once generation finishes and sees paid.
+  // status === "generating": nothing more to do here — the
+  // generation/verification hand-off chain (runGenerationStage ->
+  // runVerificationStage, started from /api/report/start) will call
+  // maybeDeliver itself once it finishes and sees paid.
 
   return Response.json({ received: true });
 }
