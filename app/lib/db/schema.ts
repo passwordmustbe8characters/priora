@@ -251,3 +251,27 @@ export const reportJobs = pgTable(
 
 export type ReportJob = typeof reportJobs.$inferSelect;
 export type NewReportJob = typeof reportJobs.$inferInsert;
+
+/**
+ * Phase 3 add-on — "Coming Soon + Price Validation" (see
+ * priora-phase3-spec-for-claude-code.md, Section 8). Deliberately its
+ * own table, not folded into report_jobs — this captures pricing
+ * research from public visitors who never generate anything and never
+ * pay; report_jobs is a real work-in-progress record for an actual
+ * report, a fundamentally different kind of row.
+ *
+ * sliderValue stored in the currency's smallest unit (kobo/cents),
+ * matching reportJobs.amount's existing convention rather than
+ * inventing a second one.
+ */
+export const pricingFeedback = pgTable("pricing_feedback", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  currency: reportCurrencyEnum("currency").notNull(),
+  sliderValue: integer("slider_value").notNull(),
+  email: text("email"), // optional — "notify me when it launches," not required to give feedback
+  ideaText: text("idea_text"), // optional — the idea that led here, if available
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type PricingFeedback = typeof pricingFeedback.$inferSelect;
+export type NewPricingFeedback = typeof pricingFeedback.$inferInsert;

@@ -3,27 +3,30 @@
 import { useState } from "react";
 import type { VerdictResponse } from "../lib/verdict";
 import { GenerateReportModal } from "./GenerateReportModal";
+import { PricingFeedbackModal } from "./PricingFeedbackModal";
 import { REPORT_BYPASS_STORAGE_KEY } from "../lib/reportBypass";
 import { useSessionStorageString } from "../lib/useSessionStorageString";
 
 /**
- * Phase 3 entry point. Opens GenerateReportModal as a popup over the
- * current results panel rather than navigating to /report/purchase —
- * see that modal's own doc comment for why it's a portal-rendered
- * overlay instead of a route. result is passed straight through as a
- * prop; no sessionStorage needed for that part since nothing navigates
- * away anymore.
+ * Phase 3 entry point. Always visible now (see Section 8 of the spec —
+ * the "Coming Soon + Price Validation" add-on) — routes to one of two
+ * popups depending on whether a report-bypass key is present:
  *
- * TEMP — in production, hidden entirely unless the report-bypass key
- * (see app/lib/reportBypass.ts) is present, since without real payment
- * wired up yet this is a free PDF generator. Local dev always shows it
- * — NODE_ENV is a Next.js build-time constant, safe to branch on here.
+ * - Key present: the real GenerateReportModal. This key isn't a launch
+ *   gate in the usual sense — it's how a small, deliberately chosen
+ *   set of founders get the actual generation experience (so they can
+ *   say what the *report itself* is worth), separate from the general
+ *   public price-slider signal below.
+ * - No key: PricingFeedbackModal — no generation, no payment, just an
+ *   honest "coming soon" screen plus a price-comfort slider for public
+ *   visitors. This is what changed: this button used to render nothing
+ *   at all without a key (built that way specifically to keep the
+ *   costly generation flow off the public internet); now it always
+ *   shows, since the no-key destination carries no generation cost.
  */
 export function GetReportButton({ result }: { result: VerdictResponse }) {
   const [open, setOpen] = useState(false);
   const bypassKey = useSessionStorageString(REPORT_BYPASS_STORAGE_KEY);
-
-  if (process.env.NODE_ENV === "production" && !bypassKey) return null;
 
   return (
     <>
@@ -43,7 +46,12 @@ export function GetReportButton({ result }: { result: VerdictResponse }) {
         </svg>
       </button>
 
-      {open && <GenerateReportModal result={result} bypassKey={bypassKey} onClose={() => setOpen(false)} />}
+      {open &&
+        (bypassKey ? (
+          <GenerateReportModal result={result} bypassKey={bypassKey} onClose={() => setOpen(false)} />
+        ) : (
+          <PricingFeedbackModal result={result} onClose={() => setOpen(false)} />
+        ))}
     </>
   );
 }
