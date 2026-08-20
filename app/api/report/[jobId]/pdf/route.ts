@@ -1,7 +1,9 @@
+import { after } from "next/server";
 import type { NextRequest } from "next/server";
 import { getDeepReportContent, getReportJobFresh } from "../../../../lib/db/reportJobs";
 import { renderReportPdf } from "../../../../lib/report/pdf";
 import { checkReportBypassAccess } from "../../../../lib/report/bypassGate";
+import { maybeStartVerification } from "../../../../lib/report/orchestrate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,6 +36,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     );
   }
   if (job.status !== "ready") {
+    // Defense in depth — the modal always polls /status first, which is
+    // what normally triggers verification (see orchestrate.ts's doc
+    // comment), but if something ever reaches this route directly
+    // without hitting /status, this is the same no-op-unless-eligible
+    // trigger so the job doesn't stall forever waiting for a poll that
+    // never comes.
+    after(() => maybeStartVerification(jobId));
     return Response.json({ status: job.status }, { status: 202 });
   }
 

@@ -1,0 +1,1 @@
+ALTER TABLE "report_jobs" ADD COLUMN "verification_started_at" timestamp with time zone;

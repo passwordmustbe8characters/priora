@@ -50,6 +50,13 @@
       "when": 1787226108050,
       "tag": "0006_legal_lady_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787235192001,
+      "tag": "0007_equal_may_parker",
+      "breakpoints": true
     }
   ]
 }

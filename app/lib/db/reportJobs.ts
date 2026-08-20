@@ -109,6 +109,21 @@ export async function claimDelivery(id: string): Promise<boolean> {
   return Boolean(row);
 }
 
+/** Atomic claim for the generation->verification hand-off (see
+ * schema.ts's verificationStartedAt doc comment) — same conditional-
+ * UPDATE pattern as claimDelivery above. Whichever /status poll first
+ * observes stage="verifying" with no claim yet wins it and is
+ * responsible for actually kicking off runVerificationStage. */
+export async function claimVerification(id: string): Promise<boolean> {
+  const db = getDb();
+  const [row] = await db
+    .update(reportJobs)
+    .set({ verificationStartedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(reportJobs.id, id), isNull(reportJobs.verificationStartedAt)))
+    .returning({ id: reportJobs.id });
+  return Boolean(row);
+}
+
 /** Typed accessor — deepReportMatches is stored as jsonb (no schema
  * enforcement from Postgres itself), this is the one place that casts
  * it back to the real shape rather than every caller doing so ad hoc. */

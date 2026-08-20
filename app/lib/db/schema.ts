@@ -221,6 +221,22 @@ export const reportJobs = pgTable(
     // dropped along with that dependency rather than kept half-wired.
     deliveryStartedAt: timestamp("delivery_started_at", { withTimezone: true }),
 
+    // Same atomic-claim pattern as deliveryStartedAt, for the
+    // generation/verification hand-off (see orchestrate.ts). An earlier
+    // version had runGenerationStage trigger verification itself via a
+    // server-to-server fetch to a sibling route — confirmed live in
+    // production that this got blocked before ever reaching the route
+    // handler (most likely Vercel deployment protection intercepting
+    // the internal call; not confirmable further without dashboard
+    // access). Replaced with a design that needs no internal fetch at
+    // all: the client's own /status poll — already proven reliable,
+    // hit successfully dozens of times in testing — claims and triggers
+    // verification the first time it observes stage="verifying" with no
+    // claim yet, giving that poll's own invocation the fresh duration
+    // budget instead of a self-call that turned out not to be trustworthy
+    // on this platform.
+    verificationStartedAt: timestamp("verification_started_at", { withTimezone: true }),
+
     // Set whenever status flips to 'failed' — without this, "alert for
     // manual follow-up" (required by both the Generator and the
     // Hallucination Verification edge cases) would have nothing to
