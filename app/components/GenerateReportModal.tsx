@@ -25,6 +25,8 @@ const STAGE_PROGRESS: Record<NonNullable<Stage>, number> = {
   verifying: 0.85,
 };
 
+const MAX_POLL_MS = 3 * 60 * 1000;
+
 /**
  * Popup version of the report-generate flow — renders via a portal
  * straight onto document.body, not nested under ResultsPanel, because
@@ -79,12 +81,28 @@ export function GenerateReportModal({
 
   // Polls /status once generation has started, driving both the live
   // stage message and the eventual switch to "ready"/"failed".
+  //
+  // Gives up after MAX_POLL_MS regardless of what the server says — the
+  // backend has its own staleness check (getReportJobFresh) that turns
+  // a genuinely dead job into a "failed" status, but that's one more
+  // layer, not a substitute for this one: if fetch itself keeps
+  // erroring (network hiccup, the tab losing connectivity), the catch
+  // branch below would otherwise retry forever with no way out, leaving
+  // the spinner running with nothing to show for it.
   useEffect(() => {
     if (!reportJobId || step !== "generating") return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    const startedAt = Date.now();
 
     const poll = async () => {
+      if (Date.now() - startedAt > MAX_POLL_MS) {
+        if (!cancelled) {
+          setError("This is taking longer than expected — please try again.");
+          setStep("failed");
+        }
+        return;
+      }
       try {
         const statusUrl = new URL(`/api/report/${reportJobId}/status`, window.location.origin);
         if (bypassKey) statusUrl.searchParams.set("key", bypassKey);

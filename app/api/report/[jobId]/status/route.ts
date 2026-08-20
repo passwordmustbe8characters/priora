@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getReportJob } from "../../../../lib/db/reportJobs";
+import { getReportJobFresh } from "../../../../lib/db/reportJobs";
 import { checkReportBypassAccess } from "../../../../lib/report/bypassGate";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,10 @@ export const dynamic = "force-dynamic";
  * status poll backing the generate modal's live progress. Remove
  * alongside the rest of the bypass once payment is wired up for real —
  * see app/lib/reportBypass.ts for the access-gate half of this.
+ *
+ * Uses getReportJobFresh, not getReportJob directly — a job stuck
+ * "generating" for too long (see that function's own comment) reports
+ * as failed here rather than leaving the modal polling forever.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   if (!checkReportBypassAccess(request.nextUrl.searchParams.get("key"))) {
@@ -17,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { jobId } = await params;
-  const job = await getReportJob(jobId);
+  const job = await getReportJobFresh(jobId);
   if (!job) {
     return Response.json({ error: { code: "NOT_FOUND", message: "No such report job." } }, { status: 404 });
   }

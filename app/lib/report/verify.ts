@@ -9,8 +9,12 @@ import type { CompetitorProfile, DeepReportContent } from "./types";
  * reasoning, not a factual claim (see generator.ts's own synthesis
  * prompt, which already enforces internal-consistency-only reasoning).
  *
- * One batched LLM call (spec: "one LLM call comparing each fact claim
- * to its source snippet"), not one call per claim.
+ * A small number of batched, parallel LLM calls (chunked ~9 claims per
+ * call — see verifyDeepReport's own comment on why) rather than the
+ * spec's literal "one LLM call," and definitely not one call per claim
+ * — chunking keeps each individual call fast while still batching, and
+ * concurrency keeps total wall-clock time close to one call's latency
+ * rather than the sum of all of them.
  *
  * PER-FIELD verification, not whole-profile — this is a deliberate
  * deviation from an earlier, simpler design that bundled a competitor's
@@ -222,7 +226,23 @@ export async function verifyDeepReport(report: DeepReportContent): Promise<DeepR
   const { claims: competitorClaims, claimIndexByRef } = buildCompetitorClaims(report.competitors);
   claims.push(...competitorClaims);
 
-  const results = await runVerification(claims);
+  // Chunked + parallel, not one call for every claim — confirmed live
+  // (production, not assumed) that one big call with a full 8-competitor
+  // report's ~26 claims at "medium" effort was slow enough to exceed
+  // Vercel Hobby's 60s hard per-invocation cap, silently killing the
+  // whole generation job mid-verification with no error ever recorded
+  // (research+synthesize alone already spend ~40s of that budget before
+  // verification even starts). Splitting into smaller concurrent calls
+  // cuts wall-clock latency without touching effort/quality — a single
+  // slow call becomes several faster ones running at once, rather than
+  // trading away the hard-won fix to verification's earlier over-
+  // rejection bug by dropping back to "low" effort.
+  const CHUNK_SIZE = 9;
+  const chunks: Claim[][] = [];
+  for (let i = 0; i < claims.length; i += CHUNK_SIZE) chunks.push(claims.slice(i, i + CHUNK_SIZE));
+  const resultMaps = await Promise.all(chunks.map((chunk) => runVerification(chunk)));
+  const results = new Map<number, VerifyResult>();
+  for (const map of resultMaps) for (const [index, result] of map) results.set(index, result);
 
   const executiveSummaryResult = results.get(PROSE_EXEC_SUMMARY_INDEX);
   const executiveSummary =

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getDeepReportContent, getReportJob } from "../../../../lib/db/reportJobs";
+import { getDeepReportContent, getReportJobFresh } from "../../../../lib/db/reportJobs";
 import { renderReportPdf } from "../../../../lib/report/pdf";
 import { checkReportBypassAccess } from "../../../../lib/report/bypassGate";
 
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { jobId } = await params;
-  const job = await getReportJob(jobId);
+  const job = await getReportJobFresh(jobId);
   if (!job) {
     return Response.json({ error: { code: "NOT_FOUND", message: "No such report job." } }, { status: 404 });
   }
