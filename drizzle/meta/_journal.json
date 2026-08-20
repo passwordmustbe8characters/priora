@@ -29,6 +29,13 @@
       "when": 1787179973902,
       "tag": "0003_furry_supernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787188535804,
+      "tag": "0004_dry_human_fly",
+      "breakpoints": true
     }
   ]
 }

@@ -5,12 +5,25 @@ import type { VerdictResponse } from "../verdict";
 import type { DeepReportContent } from "../report/types";
 
 /** Creates the row the moment "Get the full report" is clicked — before
- * payment, per the Phase 3 spec's core timing decision. */
-export async function createReportJob(ideaText: string, freeVerdict: VerdictResponse): Promise<ReportJob> {
+ * payment, per the Phase 3 spec's core timing decision. market/painPoint
+ * are the light, optional personalization collected in the generate
+ * modal right before this fires. */
+export async function createReportJob(
+  ideaText: string,
+  freeVerdict: VerdictResponse,
+  options?: { market?: "african" | "global"; painPoint?: string | null },
+): Promise<ReportJob> {
   const db = getDb();
   const [row] = await db
     .insert(reportJobs)
-    .values({ ideaText, freeVerdict, status: "generating", paymentStatus: "pending" })
+    .values({
+      ideaText,
+      freeVerdict,
+      status: "generating",
+      paymentStatus: "pending",
+      market: options?.market,
+      painPoint: options?.painPoint || null,
+    })
     .returning();
   return row;
 }
@@ -30,7 +43,15 @@ export async function updateReportJob(
   patch: Partial<
     Pick<
       NewReportJob,
-      "status" | "paymentStatus" | "currency" | "amount" | "email" | "pdfUrl" | "failureReason" | "deepReportMatches"
+      | "status"
+      | "paymentStatus"
+      | "currency"
+      | "amount"
+      | "email"
+      | "pdfUrl"
+      | "failureReason"
+      | "deepReportMatches"
+      | "stage"
     >
   >,
 ): Promise<ReportJob | null> {

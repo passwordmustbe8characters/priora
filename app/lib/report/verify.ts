@@ -53,7 +53,7 @@ Worked example — still PASSES despite one uncovered detail: Claim: "Acme offer
 
 Apply this same rule whether the claim is one sentence or several sentences describing a company.
 
-For claims marked "requiresCorrection: true" in the input, if the claim doesn't hold up, also provide a corrected version that only states what the snippet actually supports — hedge or generalize rather than removing detail that IS supported, but never assert something the snippet doesn't back up. For claims not marked "requiresCorrection", just return holdsUp — a corrected version isn't needed, that claim will simply be dropped if it fails.
+For claims marked "requiresCorrection: true" in the input, if the claim doesn't hold up, also provide a corrected version that only states what the snippet actually supports — hedge or generalize rather than removing detail that IS supported, but never assert something the snippet doesn't back up. Match the original claim's addressing style if it speaks to the reader directly ("you"/"your") — don't introduce third-person phrasing like "the founder" that wasn't there. For claims not marked "requiresCorrection", just return holdsUp — a corrected version isn't needed, that claim will simply be dropped if it fails.
 
 For every claim, first write one short sentence in "reasoning" naming the SPECIFIC contradicted or fabricated detail, if any. If your reasoning would only describe something the snippet is silent on (not contradicted, not fabricated), that is not a valid failure reason — holdsUp must be true.`;
 

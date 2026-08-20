@@ -35,6 +35,23 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Bolds every mention of a referenced company name within a prose block
+ * (executive summary, market landscape, synthesis sections) — makes the
+ * companies being discussed easy to scan at a glance. Takes already-
+ * escaped text and already-escaped names so the <strong> tags inserted
+ * here are the only unescaped markup in the result. Matches longest name
+ * first in a single combined pass (not one regex per name) so a name
+ * that's a substring of another (e.g. "Invoice" inside "Invoice NG")
+ * can't get partially matched and split a longer name's own bolding.
+ */
+function boldCompanyNames(escapedText: string, escapedNames: string[]): string {
+  const names = [...new Set(escapedNames.filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (names.length === 0) return escapedText;
+  const pattern = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return escapedText.replace(new RegExp(`\\b(${pattern})\\b`, "g"), "<strong>$1</strong>");
+}
+
 const TEMPLATE_CSS = `
   * { box-sizing: border-box; }
   body { font-family: 'Georgia', serif; color: #2b2620; font-size: 10.3pt; line-height: 1.55; margin: 0; }
@@ -77,13 +94,13 @@ const TEMPLATE_CSS = `
   .sources-list li { margin-bottom: 4px; }
 `;
 
-function competitorCard(c: CompetitorProfile): string {
+function competitorCard(c: CompetitorProfile, escapedNames: string[]): string {
   const metaParts = [c.pricing, c.fundingStage, c.targetUser].filter((v): v is string => Boolean(v)).map(escapeHtml);
   return `
     <div class="profile-card ${c.category}">
       <span class="profile-name">${escapeHtml(c.companyName)}</span><span class="badge ${c.category}">${c.category === "direct" ? "Direct" : "Adjacent"}</span>
       ${metaParts.length ? `<div class="profile-meta">${metaParts.join(" &middot; ")}</div>` : ""}
-      <div class="profile-desc">${escapeHtml(c.description)}</div>
+      <div class="profile-desc">${boldCompanyNames(escapeHtml(c.description), escapedNames)}</div>
       <div class="profile-source">Source: <a href="${escapeHtml(c.sourceUrl)}">${escapeHtml(c.sourceLabel)}</a></div>
     </div>`;
 }
@@ -93,6 +110,8 @@ export function renderReportHtml(report: DeepReportContent, generatedDateDisplay
   const adjacentCompetitors = report.competitors.filter((c) => c.category === "adjacent");
   const pricingRows = derivePricingBenchmarks(report.competitors);
   const sources = deriveSources(report);
+  const escapedNames = report.competitors.map((c) => escapeHtml(c.companyName));
+  const prose = (text: string) => boldCompanyNames(escapeHtml(text), escapedNames);
 
   const pricingTable = pricingRows.length
     ? `
@@ -114,7 +133,7 @@ export function renderReportHtml(report: DeepReportContent, generatedDateDisplay
     <h2 style="margin-top: 8px;">${escapeHtml(s.heading)}</h2>
     <div class="synthesis-box">
       <div class="head">Strategic synthesis — reasoned from what was and wasn't found</div>
-      ${escapeHtml(s.bodyText)}
+      ${prose(s.bodyText)}
     </div>`,
     )
     .join("\n");
@@ -141,21 +160,21 @@ export function renderReportHtml(report: DeepReportContent, generatedDateDisplay
 
 <span class="section-tag tag-fact">Sourced fact</span>
 <h2>Executive Summary</h2>
-<p>${escapeHtml(report.executiveSummary.text)}</p>
+<p>${prose(report.executiveSummary.text)}</p>
 
 <h2>Market Landscape</h2>
-<p>${escapeHtml(report.marketLandscape.fact.text)}</p>
+<p>${prose(report.marketLandscape.fact.text)}</p>
 
 <div class="synthesis-box">
   <div class="head">Priora's analysis — not sourced fact</div>
-  ${escapeHtml(report.marketLandscape.synthesis.text)}
+  ${prose(report.marketLandscape.synthesis.text)}
 </div>
 
 <h2>Direct Competitors</h2>
-${directCompetitors.length ? directCompetitors.map(competitorCard).join("\n") : "<p>No direct competitors were confidently identified.</p>"}
+${directCompetitors.length ? directCompetitors.map((c) => competitorCard(c, escapedNames)).join("\n") : "<p>No direct competitors were confidently identified.</p>"}
 
 <h2>Adjacent Players</h2>
-${adjacentCompetitors.length ? adjacentCompetitors.map(competitorCard).join("\n") : "<p>No adjacent players were confidently identified.</p>"}
+${adjacentCompetitors.length ? adjacentCompetitors.map((c) => competitorCard(c, escapedNames)).join("\n") : "<p>No adjacent players were confidently identified.</p>"}
 
 <h2>Pricing Benchmarks</h2>
 ${pricingTable}

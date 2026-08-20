@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   const ideaText = typeof record.ideaText === "string" ? record.ideaText.trim() : "";
   const freeVerdict = record.freeVerdict;
+  const market = record.market === "african" || record.market === "global" ? record.market : undefined;
+  const painPoint = typeof record.painPoint === "string" ? record.painPoint.trim().slice(0, 2000) : null;
 
   if (!ideaText || !freeVerdict || typeof freeVerdict !== "object") {
     return Response.json(
@@ -48,7 +50,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const job = await createReportJob(ideaText, freeVerdict as VerdictResponse);
+  const job = await createReportJob(ideaText, freeVerdict as VerdictResponse, { market, painPoint });
 
   after(() => runDeepReportPipeline(job.id));
 

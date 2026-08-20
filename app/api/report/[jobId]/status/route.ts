@@ -17,5 +17,5 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!job) {
     return Response.json({ error: { code: "NOT_FOUND", message: "No such report job." } }, { status: 404 });
   }
-  return Response.json({ status: job.status, failureReason: job.failureReason });
+  return Response.json({ status: job.status, stage: job.stage, failureReason: job.failureReason });
 }

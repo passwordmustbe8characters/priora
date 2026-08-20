@@ -37,9 +37,17 @@ export async function runDeepReportPipeline(jobId: string): Promise<void> {
 
   try {
     const freeVerdict = getFreeVerdict(job);
-    const generated = await generateDeepReport(freeVerdict);
+    await updateReportJob(jobId, { stage: "researching" });
+    const generated = await generateDeepReport(freeVerdict, {
+      market: job.market,
+      painPoint: job.painPoint,
+      onStage: async (stage) => {
+        await updateReportJob(jobId, { stage });
+      },
+    });
+    await updateReportJob(jobId, { stage: "verifying" });
     const verified = await verifyDeepReport(generated);
-    await updateReportJob(jobId, { status: "ready", deepReportMatches: verified });
+    await updateReportJob(jobId, { status: "ready", stage: null, deepReportMatches: verified });
 
     // If payment already cleared while this was running, deliver now —
     // this is generation finishing second.
@@ -48,6 +56,7 @@ export async function runDeepReportPipeline(jobId: string): Promise<void> {
     console.error(`Deep report generation failed for job ${jobId}:`, err);
     await updateReportJob(jobId, {
       status: "failed",
+      stage: null,
       failureReason: err instanceof Error ? err.message : String(err),
     });
   }

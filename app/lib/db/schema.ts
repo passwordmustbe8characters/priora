@@ -161,6 +161,7 @@ export type NewVerdictEvent = typeof verdictEvents.$inferInsert;
 export const reportStatusEnum = pgEnum("report_status", ["generating", "ready", "failed"]);
 export const paymentStatusEnum = pgEnum("report_payment_status", ["pending", "paid", "failed"]);
 export const reportCurrencyEnum = pgEnum("report_currency", ["NGN", "USD"]);
+export const reportMarketEnum = pgEnum("report_market", ["african", "global"]);
 
 export const reportJobs = pgTable(
   "report_jobs",
@@ -183,6 +184,22 @@ export const reportJobs = pgTable(
     // Null until Deep Report Generator completes; shape is the
     // DeepReportContent type in app/lib/report/types.ts.
     deepReportMatches: jsonb("deep_report_matches"),
+
+    // Light, optional personalization — collected in the generate modal
+    // right before kicking off generation, folded into the research/
+    // synthesis prompts (see generator.ts). Neither is required; a
+    // report generates fine with market defaulted and painPoint null.
+    market: reportMarketEnum("market"),
+    painPoint: text("pain_point"),
+
+    // UX-only progress signal for the live-updating generate screen —
+    // not load-bearing for correctness the way `status` is, so plain
+    // text rather than an enum (same reasoning as verdictEvents'
+    // cacheStatus/verdictStatus above: these values are read off
+    // orchestrate.ts/generator.ts's own string literals, and an enum
+    // would force a migration the moment either changes). Null once
+    // terminal (status flips to ready/failed).
+    stage: text("stage"),
 
     status: reportStatusEnum("status").notNull().default("generating"),
     paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
