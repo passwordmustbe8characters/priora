@@ -46,7 +46,15 @@ const STAGE_PROGRESS: Record<NonNullable<Stage>, number> = {
  * wired up (that page's payment code stays commented-in-place;  this
  * modal is the current primary entry point until then).
  */
-export function GenerateReportModal({ result, onClose }: { result: VerdictResponse; onClose: () => void }) {
+export function GenerateReportModal({
+  result,
+  bypassKey,
+  onClose,
+}: {
+  result: VerdictResponse;
+  bypassKey: string | null;
+  onClose: () => void;
+}) {
   const [step, setStep] = useState<Step>("questions");
   const [market, setMarket] = useState<Market>("african");
   const [painPoint, setPainPoint] = useState("");
@@ -78,7 +86,9 @@ export function GenerateReportModal({ result, onClose }: { result: VerdictRespon
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/report/${reportJobId}/status`);
+        const statusUrl = new URL(`/api/report/${reportJobId}/status`, window.location.origin);
+        if (bypassKey) statusUrl.searchParams.set("key", bypassKey);
+        const res = await fetch(statusUrl);
         const data = (await res.json()) as { status?: Step; stage?: Stage; failureReason?: string | null };
         if (cancelled) return;
         if (data.status === "ready") {
@@ -102,7 +112,7 @@ export function GenerateReportModal({ result, onClose }: { result: VerdictRespon
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [reportJobId, step]);
+  }, [reportJobId, step, bypassKey]);
 
   const generate = async () => {
     setError(null);
@@ -116,6 +126,7 @@ export function GenerateReportModal({ result, onClose }: { result: VerdictRespon
           freeVerdict: result,
           market,
           painPoint: painPoint.trim() || undefined,
+          bypassKey,
         }),
       });
       const data = (await res.json()) as { reportJobId?: string; error?: { message?: string } };
@@ -223,7 +234,7 @@ export function GenerateReportModal({ result, onClose }: { result: VerdictRespon
                 <>
                   <p className="font-display mt-4 text-xl font-bold text-ink">Your report is ready</p>
                   <a
-                    href={`/api/report/${reportJobId}/pdf`}
+                    href={`/api/report/${reportJobId}/pdf${bypassKey ? `?key=${encodeURIComponent(bypassKey)}` : ""}`}
                     className="font-body mt-6 flex h-12 w-full max-w-xs cursor-pointer items-center justify-center rounded-xl bg-ink text-surface transition hover:opacity-90"
                   >
                     Download report (PDF)

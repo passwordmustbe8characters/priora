@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Wordmark } from "./components/Wordmark";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { SearchBar } from "./components/SearchBar";
@@ -9,12 +9,20 @@ import { ResultsPanel } from "./components/ResultsPanel";
 import { IntroSequence } from "./components/IntroSequence";
 import { useIsTouchDevice } from "./lib/useIsTouchDevice";
 import { useVerdictFlow } from "./lib/useVerdictFlow";
+import { captureReportBypassKey } from "./lib/reportBypass";
 
 type Theme = "light" | "dark";
 
 export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [introDone, setIntroDone] = useState(false);
+
+  // TEMP — see app/lib/reportBypass.ts. A plain side effect (storage
+  // write, no setState), not the "derive during render" case — this
+  // genuinely needs to run once against a browser-only API.
+  useEffect(() => {
+    captureReportBypassKey();
+  }, []);
   // Only tracks the *manual* open/close (desktop's "Read more" /
   // "Close") — panelOpen below also folds in the mobile auto-open, as a
   // derived value rather than something synced into this state via an

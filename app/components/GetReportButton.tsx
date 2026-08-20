@@ -3,16 +3,27 @@
 import { useState } from "react";
 import type { VerdictResponse } from "../lib/verdict";
 import { GenerateReportModal } from "./GenerateReportModal";
+import { REPORT_BYPASS_STORAGE_KEY } from "../lib/reportBypass";
+import { useSessionStorageString } from "../lib/useSessionStorageString";
 
 /**
  * Phase 3 entry point. Opens GenerateReportModal as a popup over the
  * current results panel rather than navigating to /report/purchase —
  * see that modal's own doc comment for why it's a portal-rendered
  * overlay instead of a route. result is passed straight through as a
- * prop; no sessionStorage needed since nothing navigates away anymore.
+ * prop; no sessionStorage needed for that part since nothing navigates
+ * away anymore.
+ *
+ * TEMP — in production, hidden entirely unless the report-bypass key
+ * (see app/lib/reportBypass.ts) is present, since without real payment
+ * wired up yet this is a free PDF generator. Local dev always shows it
+ * — NODE_ENV is a Next.js build-time constant, safe to branch on here.
  */
 export function GetReportButton({ result }: { result: VerdictResponse }) {
   const [open, setOpen] = useState(false);
+  const bypassKey = useSessionStorageString(REPORT_BYPASS_STORAGE_KEY);
+
+  if (process.env.NODE_ENV === "production" && !bypassKey) return null;
 
   return (
     <>
@@ -32,7 +43,7 @@ export function GetReportButton({ result }: { result: VerdictResponse }) {
         </svg>
       </button>
 
-      {open && <GenerateReportModal result={result} onClose={() => setOpen(false)} />}
+      {open && <GenerateReportModal result={result} bypassKey={bypassKey} onClose={() => setOpen(false)} />}
     </>
   );
 }

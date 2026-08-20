@@ -2,6 +2,7 @@ import { after } from "next/server";
 import type { NextRequest } from "next/server";
 import { createReportJob } from "../../../lib/db/reportJobs";
 import { runDeepReportPipeline } from "../../../lib/report/orchestrate";
+import { checkReportBypassAccess } from "../../../lib/report/bypassGate";
 import type { VerdictResponse } from "../../../lib/verdict";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,11 @@ export async function POST(request: NextRequest) {
   }
 
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const bypassKey = typeof record.bypassKey === "string" ? record.bypassKey : null;
+  if (!checkReportBypassAccess(bypassKey)) {
+    return Response.json({ error: { code: "FORBIDDEN", message: "Not available yet." } }, { status: 403 });
+  }
+
   const ideaText = typeof record.ideaText === "string" ? record.ideaText.trim() : "";
   const freeVerdict = record.freeVerdict;
   const market = record.market === "african" || record.market === "global" ? record.market : undefined;

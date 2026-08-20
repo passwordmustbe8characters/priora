@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { getDeepReportContent, getReportJob } from "../../../../lib/db/reportJobs";
 import { renderReportHtml } from "../../../../lib/report/template";
 import { renderHtmlToPdf } from "../../../../lib/report/pdf";
+import { checkReportBypassAccess } from "../../../../lib/report/bypassGate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,7 +18,11 @@ export const maxDuration = 60;
  * gets removed alongside the commented-out payment step in
  * PurchaseFlow.tsx.
  */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
+  if (!checkReportBypassAccess(request.nextUrl.searchParams.get("key"))) {
+    return Response.json({ error: { code: "FORBIDDEN", message: "Not available yet." } }, { status: 403 });
+  }
+
   const { jobId } = await params;
   const job = await getReportJob(jobId);
   if (!job) {
