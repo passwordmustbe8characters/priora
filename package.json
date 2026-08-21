@@ -16,6 +16,7 @@
     "@sparticuz/chromium": "^149.0.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.2",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.9.3",
     "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "^5.11.0",

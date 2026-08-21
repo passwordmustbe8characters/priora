@@ -1,5 +1,5 @@
 import { LogoutButton } from "../../components/admin/LogoutButton";
-import { getAnalyticsSummary } from "../../lib/db/analytics";
+import { getAnalyticsSummary, getPricingFeedbackSummary, getReportJobsSummary } from "../../lib/db/analytics";
 
 /**
  * Phase 2 — Usage Analytics Dashboard (see docs/analytics.md). Gated by
@@ -47,6 +47,23 @@ const OUTCOME_META: Record<string, { label: string; color: string; icon: "check"
   validation_error: { label: "Validation error", color: STATUS.warning, icon: "warn" },
   pipeline_error: { label: "Pipeline error", color: STATUS.critical, icon: "x" },
 };
+
+const REPORT_STATUS_LABELS: Record<string, string> = {
+  generating: "Generating",
+  ready: "Ready",
+  failed: "Failed",
+};
+
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  pending: "Pending (payment not live yet)",
+  paid: "Paid",
+  failed: "Payment failed",
+};
+
+function formatMajor(currency: string, major: number): string {
+  const rounded = Math.round(major);
+  return currency === "NGN" ? `₦${rounded.toLocaleString()}` : `$${rounded.toLocaleString()}`;
+}
 
 function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -196,7 +213,11 @@ export default async function AnalyticsPage({
   const requested = Number(params.days);
   const days = (PERIODS as readonly number[]).includes(requested) ? requested : 30;
 
-  const summary = await getAnalyticsSummary(days);
+  const [summary, reportJobs, pricingFeedback] = await Promise.all([
+    getAnalyticsSummary(days),
+    getReportJobsSummary(days),
+    getPricingFeedbackSummary(days),
+  ]);
 
   const successCount = summary.outcomeBreakdown.find((o) => o.outcome === "success")?.count ?? 0;
   const successRate = summary.totalSearches > 0 ? Math.round((successCount / summary.totalSearches) * 100) : 0;
@@ -287,6 +308,57 @@ export default async function AnalyticsPage({
             rows={summary.topTags.map((t) => ({ key: t.tag, count: t.count }))}
             color={CATEGORICAL.aqua}
           />
+        </div>
+
+        <h2 className="font-display mt-10 text-xl font-bold text-ink">Deep report funnel</h2>
+        <p className="font-body mt-1 text-sm text-ink-soft">
+          Report-bypass key holders only, for now — this is generation activity, separate from the free-verdict
+          numbers above.
+        </p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <BarList
+            title={`Generation status · ${reportJobs.total} total`}
+            rows={reportJobs.statusBreakdown.map((s) => ({ key: s.status, count: s.count }))}
+            labelMap={REPORT_STATUS_LABELS}
+            color={CATEGORICAL.blue}
+          />
+          <BarList
+            title="Payment status"
+            rows={reportJobs.paymentBreakdown.map((p) => ({ key: p.paymentStatus, count: p.count }))}
+            labelMap={PAYMENT_STATUS_LABELS}
+            color={CATEGORICAL.orange}
+          />
+        </div>
+
+        <h2 className="font-display mt-10 text-xl font-bold text-ink">Pricing feedback</h2>
+        <p className="font-body mt-1 text-sm text-ink-soft">
+          From the public &quot;coming soon&quot; screen&apos;s price slider — {pricingFeedback.total} submission
+          {pricingFeedback.total === 1 ? "" : "s"} in this period.
+        </p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {pricingFeedback.byCurrency.length === 0 ? (
+            <div className="rounded-2xl border border-ink/10 bg-surface p-5 sm:col-span-2">
+              <p className="font-body text-sm text-ink-soft">No submissions in this period.</p>
+            </div>
+          ) : (
+            pricingFeedback.byCurrency.map((row) => (
+              <div key={row.currency} className="rounded-2xl border border-ink/10 bg-surface p-5">
+                <p className="font-body text-sm font-semibold text-ink">
+                  {row.currency} · {row.count} submission{row.count === 1 ? "" : "s"}
+                </p>
+                <div className="mt-3 flex gap-6">
+                  <div>
+                    <p className="font-body text-xs text-ink-soft">Average</p>
+                    <p className="font-body text-2xl font-semibold text-ink">{formatMajor(row.currency, row.avgMajor)}</p>
+                  </div>
+                  <div>
+                    <p className="font-body text-xs text-ink-soft">Median</p>
+                    <p className="font-body text-2xl font-semibold text-ink">{formatMajor(row.currency, row.medianMajor)}</p>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
       </div>

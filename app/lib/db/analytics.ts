@@ -87,3 +87,80 @@ export async function getAnalyticsSummary(days = 30): Promise<AnalyticsSummary> 
     dailyCounts: dailyRows.map((r) => ({ date: r.date, count: r.n })),
   };
 }
+
+export interface ReportJobsSummary {
+  total: number;
+  statusBreakdown: { status: string; count: number }[];
+  paymentBreakdown: { paymentStatus: string; count: number }[];
+}
+
+/** Report-generation funnel — how many deep reports are generating,
+ * ready, or failed, and where they sit on payment. Same trailing-window
+ * shape as getAnalyticsSummary, kept as a separate query since
+ * report_jobs and verdict_events are unrelated tables (one row per
+ * report attempt vs. one row per free verdict). */
+export async function getReportJobsSummary(days = 30): Promise<ReportJobsSummary> {
+  const db = getDb();
+  const cutoff = periodCutoff(days);
+
+  const totalRows = (await db.execute(sql`
+    select count(*)::int as n from report_jobs where created_at > ${cutoff.toISOString()}
+  `)) as unknown as { n: number }[];
+
+  const statusRows = (await db.execute(sql`
+    select status, count(*)::int as n from report_jobs
+    where created_at > ${cutoff.toISOString()}
+    group by status
+  `)) as unknown as { status: string; n: number }[];
+
+  const paymentRows = (await db.execute(sql`
+    select payment_status, count(*)::int as n from report_jobs
+    where created_at > ${cutoff.toISOString()}
+    group by payment_status
+  `)) as unknown as { payment_status: string; n: number }[];
+
+  return {
+    total: totalRows[0]?.n ?? 0,
+    statusBreakdown: statusRows.map((r) => ({ status: r.status, count: r.n })),
+    paymentBreakdown: paymentRows.map((r) => ({ paymentStatus: r.payment_status, count: r.n })),
+  };
+}
+
+export interface PricingFeedbackSummary {
+  total: number;
+  byCurrency: { currency: string; count: number; avgMajor: number; medianMajor: number }[];
+}
+
+/** Phase 3 add-on (Section 8) — aggregate pricing-slider signal, not
+ * individual rows (this is research data, not something to browse
+ * submission-by-submission). Values converted from the stored smallest
+ * unit (kobo/cents) to the currency's major unit for display. */
+export async function getPricingFeedbackSummary(days = 30): Promise<PricingFeedbackSummary> {
+  const db = getDb();
+  const cutoff = periodCutoff(days);
+
+  const totalRows = (await db.execute(sql`
+    select count(*)::int as n from pricing_feedback where created_at > ${cutoff.toISOString()}
+  `)) as unknown as { n: number }[];
+
+  const rows = (await db.execute(sql`
+    select
+      currency,
+      count(*)::int as n,
+      avg(slider_value)::float as avg_value,
+      percentile_cont(0.5) within group (order by slider_value)::float as median_value
+    from pricing_feedback
+    where created_at > ${cutoff.toISOString()}
+    group by currency
+  `)) as unknown as { currency: string; n: number; avg_value: number; median_value: number }[];
+
+  return {
+    total: totalRows[0]?.n ?? 0,
+    byCurrency: rows.map((r) => ({
+      currency: r.currency,
+      count: r.n,
+      avgMajor: r.avg_value / 100,
+      medianMajor: r.median_value / 100,
+    })),
+  };
+}
