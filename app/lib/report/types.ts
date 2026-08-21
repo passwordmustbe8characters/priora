@@ -46,6 +46,14 @@ export interface CompetitorProfile {
   pricingModel: string | null;
   fundingStage: string | null;
   targetUser: string | null;
+  // Phase 3, Section 10 (richer content, zero extra LLM calls) — same
+  // research call, wider schema, same "omit if not explicit" rule as
+  // every other field here. targetUser above already covers "target
+  // customer segment," so that ask from the spec isn't a new field.
+  foundedYear: string | null; // e.g. "2019" — a string, not a number: source text sometimes gives "founded in early 2019" etc., no need to force-parse
+  headquarters: string | null; // HQ / primary market, e.g. "Lagos, Nigeria"
+  namedInvestors: string | null; // distinct from fundingStage (round type, e.g. "Series A") — actual investor names when stated
+  differentiator: string | null; // one sentence, only if the source text states one directly — never inferred
   sourceUrl: string;
   sourceLabel: string; // short display label for the link, e.g. "Official website"
   // Ground truth for verification — same role as FactText.sourceSnippet.
@@ -94,6 +102,82 @@ export function derivePricingBenchmarks(competitors: CompetitorProfile[]): Prici
       topPrice: c.topPrice,
       pricingModel: c.pricingModel,
     }));
+}
+
+export interface MarketStats {
+  directCount: number;
+  adjacentCount: number;
+  totalCount: number;
+  // null when there's no safe comparison to make — see the parsing
+  // note below on why this deliberately doesn't force one.
+  priceComparison: {
+    currencySymbol: "$" | "₦";
+    cheapest: { companyName: string; entryPrice: string };
+    priciest: { companyName: string; entryPrice: string };
+  } | null;
+}
+
+function parsePrice(entryPrice: string): { symbol: "$" | "₦"; value: number } | null {
+  const symbolMatch = entryPrice.match(/[$₦]/);
+  if (!symbolMatch) return null;
+  const numberMatch = entryPrice.replace(/,/g, "").match(/[0-9]+(\.[0-9]+)?/);
+  if (!numberMatch) return null;
+  return { symbol: symbolMatch[0] as "$" | "₦", value: parseFloat(numberMatch[0]) };
+}
+
+/**
+ * Phase 3, Section 10, Technique 3 — computed, not generated: plain
+ * arithmetic over already-verified fields, zero hallucination risk
+ * since nothing is invented, only calculated. Tagged as sourced-fact
+ * content when rendered (see template.ts) for the same reason.
+ *
+ * The one real risk here is silent nonsense, not invention: entryPrice
+ * is free-text from research (e.g. "$15/month", "₦5,000", "Contact for
+ * pricing"), and this app's own reports frequently mix African and
+ * global competitors in one set — comparing raw numbers across
+ * currencies would produce a technically-computed but factually
+ * misleading "cheapest" claim (₦5,000 as a bare number is larger than
+ * $15, despite being worth far less). So: only compute a price
+ * comparison when at least two competitors have a parseable price in
+ * the SAME currency; anything that doesn't parse, or the wrong
+ * currency, is simply excluded from the comparison rather than forced
+ * into it. No comparison at all (not a wrong one) when the set doesn't
+ * cleanly support it.
+ */
+export function deriveMarketStats(competitors: CompetitorProfile[]): MarketStats {
+  const directCount = competitors.filter((c) => c.category === "direct").length;
+  const adjacentCount = competitors.filter((c) => c.category === "adjacent").length;
+
+  const parsed = competitors
+    .map((c) => ({ c, price: c.entryPrice ? parsePrice(c.entryPrice) : null }))
+    .filter((row): row is { c: CompetitorProfile; price: { symbol: "$" | "₦"; value: number } } => row.price !== null);
+
+  const bySymbol = new Map<"$" | "₦", typeof parsed>();
+  for (const row of parsed) {
+    const list = bySymbol.get(row.price.symbol) ?? [];
+    list.push(row);
+    bySymbol.set(row.price.symbol, list);
+  }
+
+  let priceComparison: MarketStats["priceComparison"] = null;
+  // Only use a currency group if it's not just large by coincidence —
+  // pick whichever single-currency group has the most entries, and
+  // only if there are at least two to actually compare.
+  let best: typeof parsed = [];
+  for (const list of bySymbol.values()) {
+    if (list.length > best.length) best = list;
+  }
+  if (best.length >= 2) {
+    const cheapestRow = best.reduce((a, b) => (b.price.value < a.price.value ? b : a));
+    const priciestRow = best.reduce((a, b) => (b.price.value > a.price.value ? b : a));
+    priceComparison = {
+      currencySymbol: best[0].price.symbol,
+      cheapest: { companyName: cheapestRow.c.companyName, entryPrice: cheapestRow.c.entryPrice! },
+      priciest: { companyName: priciestRow.c.companyName, entryPrice: priciestRow.c.entryPrice! },
+    };
+  }
+
+  return { directCount, adjacentCount, totalCount: competitors.length, priceComparison };
 }
 
 /** Sources & Methodology page — every distinct source across the

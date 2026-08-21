@@ -39,6 +39,7 @@ Research thoroughly with web search, across multiple angles in the same pass:
 1. Go deeper on each already-known competitor — find their actual pricing tiers, funding stage, and target customer where discoverable.
 2. Search more broadly for competitors the earlier, lighter pass may have missed, including adjacent/indirect players solving a related problem a different way.
 3. Look specifically for pricing and business-model detail — this is often thin or missing from a first pass and is exactly what makes this report worth more.
+4. Also look for: founding year, headquarters/primary market, named investors (distinct from just the funding round type — actual investor names when a source states them), and a one-sentence differentiator IF the company's own materials state one directly (e.g. a stated positioning line) — these add real depth to a profile but are exactly the kind of detail worth skipping (null) rather than guessing at when a source doesn't clearly say so.
 
 If a target market is specified, weight research toward companies and pricing actually relevant to that market (e.g. "african" means prioritize African/Nigeria-relevant players and local pricing over purely US/EU-only products, though a genuinely dominant global player is still worth including). If a specific pain point is given, let it sharpen which competitor details you dig for (the parts of a competitor's offering that bear on that exact problem), not just a generic profile.
 
@@ -69,6 +70,10 @@ const RESEARCH_SCHEMA = {
           pricingModel: { type: ["string", "null"] as const },
           fundingStage: { type: ["string", "null"] as const },
           targetUser: { type: ["string", "null"] as const },
+          foundedYear: { type: ["string", "null"] as const },
+          headquarters: { type: ["string", "null"] as const },
+          namedInvestors: { type: ["string", "null"] as const },
+          differentiator: { type: ["string", "null"] as const },
           sourceUrl: { type: "string" as const },
           sourceLabel: { type: "string" as const },
           sourceSnippet: { type: ["string", "null"] as const },
@@ -83,6 +88,10 @@ const RESEARCH_SCHEMA = {
           "pricingModel",
           "fundingStage",
           "targetUser",
+          "foundedYear",
+          "headquarters",
+          "namedInvestors",
+          "differentiator",
           "sourceUrl",
           "sourceLabel",
           "sourceSnippet",

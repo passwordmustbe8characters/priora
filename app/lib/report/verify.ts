@@ -149,9 +149,22 @@ const PROSE_EXEC_SUMMARY_INDEX = 0;
 const PROSE_MARKET_LANDSCAPE_INDEX = 1;
 const COMPETITOR_CLAIMS_START = 2;
 
-// Per competitor: one required core claim, plus up to 3 optional
-// sub-field claims (only created when that field is actually populated).
-type CompetitorClaimKind = "core" | "pricing" | "fundingStage" | "targetUser";
+// Per competitor: one required core claim, plus optional sub-field
+// claims (only created when that field is actually populated). Section
+// 10's four new fields (foundedYear/headquarters/namedInvestors/
+// differentiator) extend this list the same way fundingStage/
+// targetUser already did — same per-field, null-out-on-failure pattern,
+// not folded into "core" (a bad differentiator claim shouldn't be able
+// to sink an otherwise well-verified company description).
+type CompetitorClaimKind =
+  | "core"
+  | "pricing"
+  | "fundingStage"
+  | "targetUser"
+  | "foundedYear"
+  | "headquarters"
+  | "namedInvestors"
+  | "differentiator";
 
 // Keyed as `${competitorIndex}:${kind}` -> claim index, so results can be
 // looked back up per competitor/field without re-scanning arrays.
@@ -201,6 +214,22 @@ function buildCompetitorClaims(
 
     if (c.targetUser) {
       addClaim(i, "targetUser", `${c.companyName} target user: ${c.targetUser}`, c.sourceSnippet);
+    }
+
+    if (c.foundedYear) {
+      addClaim(i, "foundedYear", `${c.companyName} was founded in ${c.foundedYear}`, c.sourceSnippet);
+    }
+
+    if (c.headquarters) {
+      addClaim(i, "headquarters", `${c.companyName} is headquartered in ${c.headquarters}`, c.sourceSnippet);
+    }
+
+    if (c.namedInvestors) {
+      addClaim(i, "namedInvestors", `${c.companyName}'s investors: ${c.namedInvestors}`, c.sourceSnippet);
+    }
+
+    if (c.differentiator) {
+      addClaim(i, "differentiator", `${c.companyName} states its differentiator as: ${c.differentiator}`, c.sourceSnippet);
     }
   });
 
@@ -269,9 +298,10 @@ export async function verifyDeepReport(report: DeepReportContent): Promise<DeepR
   // Reassemble competitors from the per-field results. Core claims are
   // corrected (unsupported clause trimmed), not dropped, unless there's
   // nothing salvageable at all — see addClaim's comment above for why.
-  // Sub-field claims (pricing/fundingStage/targetUser) still null out
-  // outright on failure rather than get corrected — they're single
-  // discrete facts already, nothing left to trim down to.
+  // Every other sub-field claim (pricing, fundingStage, targetUser, and
+  // Section 10's foundedYear/headquarters/namedInvestors/differentiator)
+  // still nulls out outright on failure rather than gets corrected —
+  // they're single discrete facts already, nothing left to trim down to.
   const getResult = (competitorIndex: number, kind: CompetitorClaimKind): VerifyResult | undefined => {
     const claimIndex = claimIndexByRef.get(`${competitorIndex}:${kind}`);
     return claimIndex === undefined ? undefined : results.get(claimIndex);
@@ -308,6 +338,18 @@ export async function verifyDeepReport(report: DeepReportContent): Promise<DeepR
     }
     if (c.targetUser && !holdsUp(i, "targetUser")) {
       next = { ...next, targetUser: null };
+    }
+    if (c.foundedYear && !holdsUp(i, "foundedYear")) {
+      next = { ...next, foundedYear: null };
+    }
+    if (c.headquarters && !holdsUp(i, "headquarters")) {
+      next = { ...next, headquarters: null };
+    }
+    if (c.namedInvestors && !holdsUp(i, "namedInvestors")) {
+      next = { ...next, namedInvestors: null };
+    }
+    if (c.differentiator && !holdsUp(i, "differentiator")) {
+      next = { ...next, differentiator: null };
     }
     competitors.push(next);
   });

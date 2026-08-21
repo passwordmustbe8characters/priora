@@ -1,5 +1,5 @@
 import type { CompetitorProfile, DeepReportContent } from "./types";
-import { derivePricingBenchmarks, deriveSources } from "./types";
+import { derivePricingBenchmarks, deriveMarketStats, deriveSources } from "./types";
 
 /**
  * Phase 3 — Report Document Assembly's HTML template. Adapted from the
@@ -83,6 +83,12 @@ const TEMPLATE_CSS = `
   .profile-meta { font-family: 'Helvetica', sans-serif; font-size: 8.5pt; color: #6b6255; margin-top: 4px; }
   .profile-desc { margin-top: 8px; font-size: 9.5pt; }
   .profile-source { font-family: 'Helvetica', sans-serif; font-size: 8pt; color: #8a6c3f; margin-top: 6px; }
+  .profile-differentiator { font-style: italic; color: #6b4a1f; margin-top: 6px; font-size: 9.3pt; }
+
+  .stats-row { display: flex; gap: 10px; margin: 10px 0; }
+  .stat-tile { flex: 1; border: 1px solid #ddd3c0; border-radius: 6px; padding: 10px 14px; background: #fdfcf9; }
+  .stat-tile .n { font-family: 'Helvetica', sans-serif; font-size: 17pt; font-weight: bold; color: #1c1712; }
+  .stat-tile .l { font-family: 'Helvetica', sans-serif; font-size: 7.8pt; text-transform: uppercase; letter-spacing: 0.4px; color: #6b6255; margin-top: 2px; }
 
   table { width: 100%; border-collapse: collapse; margin: 10px 0; font-family: 'Helvetica', sans-serif; font-size: 8.6pt; }
   th { background: #1c1712; color: #e8ddc8; text-align: left; padding: 7px 9px; }
@@ -98,12 +104,26 @@ const TEMPLATE_CSS = `
 `;
 
 function competitorCard(c: CompetitorProfile, escapedNames: string[]): string {
-  const metaParts = [c.pricing, c.fundingStage, c.targetUser].filter((v): v is string => Boolean(v)).map(escapeHtml);
+  // Phase 3, Section 10, Technique 1 — same fields as before plus the
+  // wider extraction schema's new ones, folded into the same meta line
+  // rather than a new visual element (they're the same kind of short,
+  // labeled fact as pricing/fundingStage/targetUser already were).
+  const metaParts = [
+    c.pricing,
+    c.fundingStage,
+    c.namedInvestors,
+    c.foundedYear && `Founded ${c.foundedYear}`,
+    c.headquarters,
+    c.targetUser,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .map(escapeHtml);
   return `
     <div class="profile-card ${c.category}">
       <span class="profile-name">${escapeHtml(c.companyName)}</span><span class="badge ${c.category}">${c.category === "direct" ? "Direct" : "Adjacent"}</span>
       ${metaParts.length ? `<div class="profile-meta">${metaParts.join(" &middot; ")}</div>` : ""}
       <div class="profile-desc">${boldCompanyNames(escapeHtml(c.description), escapedNames)}</div>
+      ${c.differentiator ? `<div class="profile-differentiator">&ldquo;${boldCompanyNames(escapeHtml(c.differentiator), escapedNames)}&rdquo;</div>` : ""}
       <div class="profile-source">Source: <a href="${escapeHtml(c.sourceUrl)}">${escapeHtml(c.sourceLabel)}</a></div>
     </div>`;
 }
@@ -137,6 +157,7 @@ export function renderContentHtml(report: DeepReportContent): string {
   const adjacentCompetitors = report.competitors.filter((c) => c.category === "adjacent");
   const pricingRows = derivePricingBenchmarks(report.competitors);
   const sources = deriveSources(report);
+  const stats = deriveMarketStats(report.competitors);
   const escapedNames = report.competitors.map((c) => escapeHtml(c.companyName));
   const prose = (text: string) => boldCompanyNames(escapeHtml(text), escapedNames);
 
@@ -152,6 +173,23 @@ export function renderContentHtml(report: DeepReportContent): string {
         .join("\n")}
     </table>`
     : `<p>Pricing detail wasn't confidently found for the companies in this report.</p>`;
+
+  // Phase 3, Section 10, Technique 3 — computed, not generated (see
+  // deriveMarketStats's own doc comment on why the price comparison can
+  // be null rather than forced). Tagged as sourced fact, same as the
+  // pricing table below: it's arithmetic over already-verified fields,
+  // not reasoned inference.
+  const statsHtml = `
+    <div class="stats-row">
+      <div class="stat-tile"><div class="n">${stats.directCount}</div><div class="l">Direct competitors</div></div>
+      <div class="stat-tile"><div class="n">${stats.adjacentCount}</div><div class="l">Adjacent players</div></div>
+      <div class="stat-tile"><div class="n">${stats.totalCount}</div><div class="l">Total found</div></div>
+    </div>
+    ${
+      stats.priceComparison
+        ? `<p><strong>${escapeHtml(stats.priceComparison.cheapest.companyName)}</strong> is the lowest entry price found (${escapeHtml(stats.priceComparison.cheapest.entryPrice)}); <strong>${escapeHtml(stats.priceComparison.priciest.companyName)}</strong> the highest (${escapeHtml(stats.priceComparison.priciest.entryPrice)}), among competitors with comparable ${stats.priceComparison.currencySymbol === "$" ? "USD" : "NGN"} pricing.</p>`
+        : ""
+    }`;
 
   const synthesisSectionsHtml = report.synthesisSections
     .map(
@@ -181,6 +219,10 @@ export function renderContentHtml(report: DeepReportContent): string {
   <div class="head">Priora's analysis — not sourced fact</div>
   ${prose(report.marketLandscape.synthesis.text)}
 </div>
+
+<span class="section-tag tag-fact">Sourced fact</span>
+<h2>Market at a Glance</h2>
+${statsHtml}
 
 <h2>Direct Competitors</h2>
 ${directCompetitors.length ? directCompetitors.map((c) => competitorCard(c, escapedNames)).join("\n") : "<p>No direct competitors were confidently identified.</p>"}
