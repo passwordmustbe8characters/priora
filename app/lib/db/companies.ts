@@ -27,6 +27,27 @@ function toPgTextArrayLiteral(values: string[]): string {
 // Requiring at least 2 shared tags is a cheap, meaningful precision bump.
 const MIN_SHARED_TAGS = 2;
 
+// ...but 2 shared tags alone still isn't enough on its own — confirmed
+// live: a Nigerian retail-inventory idea (tags: saas, retail, b2b, smb,
+// messaging) surfaced a set of beauty-salon booking companies as "fresh
+// candidates" purely because they shared {smb, saas, b2b} — three tags,
+// comfortably over MIN_SHARED_TAGS, and every single one of them a
+// cross-cutting business-model/audience tag, not the one tag ("retail")
+// that actually describes what either company does. cachedMatch then
+// correctly scored those candidates near-zero (they really aren't
+// related), so the founder saw "no matches" on an idea that had real,
+// findable competitors — the cache pre-empted a live search it had no
+// business pre-empting, not a search-quality problem.
+//
+// Fix: at least one of the shared tags must be a genuine vertical/domain
+// tag, not drawn only from this small set of tags that describe *how* a
+// business operates rather than *what* it does — those are common enough
+// across totally unrelated industries that overlapping on them alone
+// proves nothing. Two ideas sharing only "b2b" and "saas" could be a
+// payments platform and a beauty-booking app; two sharing "retail" and
+// "b2b" are actually both retail businesses.
+const GENERIC_TAGS = new Set(["b2b", "b2c", "b2b2c", "enterprise", "smb", "consumer", "saas"]);
+
 /**
  * Companies sharing at least MIN_SHARED_TAGS category tags with the given
  * ones, still inside the freshness window — candidates for a cache-hit
@@ -40,6 +61,12 @@ export async function findFreshCandidates(categoryTags: string[], limit = 10): P
   if (categoryTags.length < MIN_SHARED_TAGS) return [];
   const db = getDb();
   const tagsLiteral = toPgTextArrayLiteral(categoryTags);
+  const nonGenericTags = categoryTags.filter((t) => !GENERIC_TAGS.has(t));
+  // Deliberately can be an empty-array literal ("{}") when the idea's own
+  // tags happen to be entirely generic — `tag = ANY('{}'::text[])` never
+  // matches, so that just falls through to live search rather than
+  // guessing, which is the right failure mode here.
+  const nonGenericTagsLiteral = toPgTextArrayLiteral(nonGenericTags);
   return db
     .select()
     .from(companies)
@@ -49,6 +76,10 @@ export async function findFreshCandidates(categoryTags: string[], limit = 10): P
           SELECT count(*) FROM unnest(${companies.categoryTags}) AS tag
           WHERE tag = ANY(${tagsLiteral}::text[])
         ) >= ${MIN_SHARED_TAGS}`,
+        sql`(
+          SELECT count(*) FROM unnest(${companies.categoryTags}) AS tag
+          WHERE tag = ANY(${nonGenericTagsLiteral}::text[])
+        ) >= 1`,
         gt(companies.lastUpdatedAt, ttlCutoff()),
       ),
     )

@@ -197,7 +197,7 @@ async function cachedMatch(
 
 const LIVE_SEARCH_SYSTEM_PROMPT = `You are Priora's competitor search engine. You'll be given a founder's idea, already normalized into one clear sentence, and a set of category tags for it. You:
 
-1. Use web search to look for real, currently-existing products or companies solving a similar problem. Check well-known Western startup sources (Crunchbase, Product Hunt, Y Combinator, G2) and African startup sources (Briter Bridges, Disrupt Africa, TechCabal, Techpoint Africa, WeeTracker) where relevant to the idea's market.
+1. Use web search to look for real, currently-existing products or companies solving a similar problem — across multiple distinct query angles in this same pass, not just one search on the idea's own wording. Try the core problem/action in plain terms, try it with the target market or region named explicitly (e.g. adding "Nigeria" or "Africa" for a locally-focused idea), and try any obvious close synonyms for the product category — a niche or locally-specific idea often has real competitors that only surface under a differently-worded query, not the founder's own phrasing. Check well-known Western startup sources (Crunchbase, Product Hunt, Y Combinator, G2) and African startup sources (Briter Bridges, Disrupt Africa, TechCabal, Techpoint Africa, WeeTracker) where relevant to the idea's market, as well as app stores (Google Play, Apple App Store) for consumer-facing ideas — a real competitor with no press coverage still shows up there.
 2. For each real result you find, score how closely it matches the idea, 0-100.
 3. Decide an overall status:
    - "exists" if you found two or more strong matches (score 70+)
@@ -283,11 +283,18 @@ async function liveSearchAndMatch(
 
   const response = await client.responses.create({
     model: VERDICT_MODEL,
-    // "low" search context + "low" reasoning effort: this task is judging
-    // search results against a short idea, not deep multi-step reasoning —
-    // OpenAI's own guidance recommends "low" reasoning specifically for
-    // tool-use/search tasks. Cuts latency without gutting quality.
-    tools: [{ type: "web_search", search_context_size: "low" }],
+    // "medium" search context (not "low") — this is the free tool's ONLY
+    // search pass (no deeper follow-up the way the paid deep report gets),
+    // so it needs enough room to actually run the multi-angle search the
+    // prompt above asks for. "low" was confirmed live to under-search:
+    // real, findable competitors for niche/locally-specific ideas (e.g. a
+    // Nigeria-specific WhatsApp inventory tool) came back with zero
+    // matches on "low" context, then turned up several real ones minutes
+    // later when the same idea went through the deep report's "medium"-
+    // context research call. Reasoning effort stays "low" — OpenAI's own
+    // guidance recommends that specifically for tool-use/search tasks, and
+    // the gap here was breadth of search, not depth of reasoning over it.
+    tools: [{ type: "web_search", search_context_size: "medium" }],
     reasoning: { effort: "low" },
     input: [
       { role: "system", content: LIVE_SEARCH_SYSTEM_PROMPT },
