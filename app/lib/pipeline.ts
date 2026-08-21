@@ -25,6 +25,21 @@ import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
  */
 
 const MIN_CACHE_CANDIDATES = 3;
+// A second, output-side check — MIN_CACHE_CANDIDATES above only gates
+// whether the cache is even worth *trying*; this gates whether it
+// actually delivered. Confirmed live: a category can clear the input
+// bar (>=3 candidates on file, sharing genuinely relevant tags — not
+// the earlier generic-tag false-positive case) while most of them
+// still score below MIN_CACHED_MATCH_SCORE, because the DB simply
+// hasn't ingested most of the real players in that category yet (a
+// "food ordering app" search once returned only 2 matches — both from
+// one old bulk-ingestion batch — when the true market has far more).
+// Without this, a thin/stale cache silently caps what a founder ever
+// sees, forever, since nothing ever re-checks it against a live
+// search. Same threshold as the input gate, reused deliberately: the
+// cache only earns the right to skip a live search by actually
+// producing what that gate promised, not just by existing.
+const MIN_ACCEPTABLE_CACHE_MATCHES = MIN_CACHE_CANDIDATES;
 // Cache retrieval (findFreshCandidates) is a coarse tag-overlap filter,
 // not a relevance judgment — the model must score every candidate it's
 // handed, so a genuinely irrelevant one it correctly scores low would
@@ -330,9 +345,17 @@ export async function runVerdictPipeline(
 
   let result: { status: VerdictStatus; headline: string; confidence: number; matches: VerdictMatch[] };
 
-  if (cached.length >= MIN_CACHE_CANDIDATES) {
+  // Try the cache first if it looks promising, but don't just trust
+  // that promise — cachedMatch itself is what actually proves whether
+  // the candidates it was handed were real matches or not. See
+  // MIN_ACCEPTABLE_CACHE_MATCHES above for why the result also has to
+  // clear a bar, not just the candidate count going in.
+  const cacheResult =
+    cached.length >= MIN_CACHE_CANDIDATES ? await cachedMatch(normalized.normalizedIdea, cached) : null;
+
+  if (cacheResult && cacheResult.matches.length >= MIN_ACCEPTABLE_CACHE_MATCHES) {
     if (debug) debug.cacheHit = true;
-    result = await cachedMatch(normalized.normalizedIdea, cached);
+    result = cacheResult;
   } else {
     if (debug) debug.cacheHit = false;
     const live = await liveSearchAndMatch(normalized.normalizedIdea, normalized.categoryTags);
