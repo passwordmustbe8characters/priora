@@ -98,6 +98,14 @@ const TEMPLATE_CSS = `
   .synthesis-box { background: #f8f1e0; border: 1px solid #e5d3a8; padding: 12px 16px; margin: 10px 0; font-size: 9.6pt; }
   .synthesis-box .head { font-family: 'Helvetica', sans-serif; font-size: 8pt; font-weight: bold; color: #6b4a1f; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
 
+  .debate-row { display: flex; gap: 14px; margin: 10px 0; }
+  .debate-box { flex: 1; border: 1px solid; border-radius: 6px; padding: 12px 16px; font-size: 9.6pt; }
+  .debate-box .head { font-family: 'Helvetica', sans-serif; font-size: 8pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .debate-box.bull { background: #eef3e6; border-color: #c3d6ae; }
+  .debate-box.bull .head { color: #3d5c2f; }
+  .debate-box.bear { background: #f7e9e6; border-color: #e0bdb4; }
+  .debate-box.bear .head { color: #8a3f2f; }
+
   .footer-note { font-family: 'Helvetica', sans-serif; font-size: 8pt; color: #9a9188; font-style: italic; margin-top: 20px; }
   .sources-list { font-family: 'Helvetica', sans-serif; font-size: 8.6pt; }
   .sources-list li { margin-bottom: 4px; }
@@ -203,6 +211,30 @@ export function renderContentHtml(report: DeepReportContent): string {
     )
     .join("\n");
 
+  // Section 11 — omitted entirely (not rendered as an empty/placeholder
+  // section) when debate is null: older reports generated before this
+  // shipped, and any report where debate generation itself failed (see
+  // orchestrate.ts's runDebateStage — a failure here never blocks the
+  // rest of the report). Positioned after Priora's own synthesis
+  // sections and before Sources & Methodology, per the spec's page
+  // order — this is argument built on top of both the sourced facts
+  // above and Priora's own read of them.
+  const debateHtml = report.debate
+    ? `
+    <span class="section-tag tag-synthesis">Priora's analysis</span>
+    <h2>The Case For / The Case Against</h2>
+    <div class="debate-row">
+      <div class="debate-box bull">
+        <div class="head">The case for</div>
+        ${prose(report.debate.bullCase.text)}
+      </div>
+      <div class="debate-box bear">
+        <div class="head">The case against</div>
+        ${prose(report.debate.bearCase.text)}
+      </div>
+    </div>`
+    : "";
+
   const sourcesListHtml = sources.length
     ? `<ul class="sources-list">${sources.map((s) => `<li><a href="${escapeHtml(s.url)}">${escapeHtml(s.label)}</a></li>`).join("\n")}</ul>`
     : `<p>No external sources were used in this report.</p>`;
@@ -234,6 +266,8 @@ ${adjacentCompetitors.length ? adjacentCompetitors.map((c) => competitorCard(c, 
 ${pricingTable}
 
 ${synthesisSectionsHtml}
+
+${debateHtml}
 
 <h2>Sources &amp; Methodology</h2>
 ${sourcesListHtml}

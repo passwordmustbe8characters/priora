@@ -1,4 +1,5 @@
 import {
+  claimDebate,
   claimDelivery,
   claimVerification,
   getDeepReportContent,
@@ -7,6 +8,7 @@ import {
   updateReportJob,
 } from "../db/reportJobs";
 import { assembleReport } from "./assemble";
+import { generateDebate } from "./debate";
 import { sendReportEmail } from "./email";
 import { generateDeepReport } from "./generator";
 import { verifyDeepReport } from "./verify";
@@ -38,22 +40,28 @@ import { verifyDeepReport } from "./verify";
  * latency a lot but wasn't sufficient on its own — research+synthesize
  * alone already spend most of a 60s budget).
  *
- * The hand-off between the two stages is NOT a server-to-server fetch —
- * an earlier version tried exactly that (runGenerationStage calling a
+ * The hand-off between stages is NOT a server-to-server fetch — an
+ * earlier version tried exactly that (runGenerationStage calling a
  * sibling /api/report/[jobId]/verify route directly) and confirmed live
  * in production that the internal call got blocked before ever
  * reaching the route handler, most likely Vercel deployment protection
  * intercepting it (not confirmable further without dashboard access).
- * Instead, the CLIENT's own /status poll triggers stage 2: the first
- * poll that observes stage="verifying" with no verificationStartedAt
- * claim yet wins the claim (claimVerification, same atomic
- * conditional-UPDATE pattern as claimDelivery) and fires
- * runVerificationStage from within THAT poll's own request handling —
- * a fresh invocation with its own duration budget, and one going
- * through a path (the public /status endpoint) already proven reliable
- * by every other test in this project rather than a fetch whose actual
- * failure mode was never fully diagnosable. See status/route.ts for the
- * trigger side of this.
+ * Instead, the CLIENT's own /status poll triggers each next stage: the
+ * first poll that observes a given stage with no claim yet on it wins
+ * that claim (claimVerification / claimDebate, same atomic conditional-
+ * UPDATE pattern as claimDelivery) and runs the corresponding stage
+ * from within THAT poll's own request handling — a fresh invocation
+ * with its own duration budget, going through a path (the public
+ * /status endpoint) already proven reliable by every other test in
+ * this project rather than a fetch whose actual failure mode was never
+ * fully diagnosable. See status/route.ts for the trigger side of this.
+ *
+ * Three stages now, not two — Section 11's bull/bear debate needs
+ * already-verified data to reason over (grounding only works if the
+ * facts it's grounded in have already passed verification), so it's
+ * chained as a third stage after verification rather than folded into
+ * either existing one: runGenerationStage -> runVerificationStage ->
+ * runDebateStage -> ready.
  */
 
 /** Stage 1: generate (research + synthesize) through to having
@@ -108,10 +116,12 @@ export async function maybeStartVerification(jobId: string): Promise<void> {
   await runVerificationStage(jobId);
 }
 
-/** Stage 2: takes the unverified content stashed by runGenerationStage,
- * verifies it, and — this stage's job, not stage 1's — is what
- * actually flips status to "ready". Only ever called via
- * maybeStartVerification's claim check above. */
+/** Stage 2: takes the unverified content stashed by runGenerationStage
+ * and verifies it. Hands off to stage 3 (debate) the same way stage 1
+ * hands off to this one — stashes the verified content, sets
+ * stage="debating", does NOT flip status to "ready" itself anymore
+ * (that's stage 3's job now that a stage exists after this one). Only
+ * ever called via maybeStartVerification's claim check above. */
 export async function runVerificationStage(jobId: string): Promise<void> {
   const job = await getReportJob(jobId);
   if (!job) {
@@ -124,11 +134,7 @@ export async function runVerificationStage(jobId: string): Promise<void> {
     if (!generated) throw new Error("No generated content found to verify");
 
     const verified = await verifyDeepReport(generated);
-    await updateReportJob(jobId, { status: "ready", stage: null, deepReportMatches: verified });
-
-    // If payment already cleared while this was running, deliver now —
-    // this is generation finishing second.
-    await maybeDeliver(jobId);
+    await updateReportJob(jobId, { stage: "debating", deepReportMatches: verified });
   } catch (err) {
     console.error(`Verification failed for job ${jobId}:`, err);
     await updateReportJob(jobId, {
@@ -137,6 +143,57 @@ export async function runVerificationStage(jobId: string): Promise<void> {
       failureReason: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** Claims and (if the claim was actually won) runs stage 3 — called
+ * from GET /api/report/[jobId]/status on every poll, same no-op-unless-
+ * eligible pattern as maybeStartVerification. */
+export async function maybeStartDebate(jobId: string): Promise<void> {
+  const job = await getReportJob(jobId);
+  if (!job) return;
+  if (job.status !== "generating" || job.stage !== "debating") return;
+  if (job.debateStartedAt) return;
+
+  const won = await claimDebate(jobId);
+  if (!won) return;
+
+  await runDebateStage(jobId);
+}
+
+/** Stage 3: generates the bull/bear debate from the now-verified report
+ * content, and — this stage's job now, not stage 2's — is what
+ * actually flips status to "ready". Debate generation failing does NOT
+ * fail the whole report: per the spec, this is an enhancement a report
+ * can ship without, not a required section (template.ts omits it
+ * cleanly when debate is null) — so on failure this still reaches
+ * "ready" with debate left null, rather than throwing the otherwise-
+ * complete report away over an optional section. Only ever called via
+ * maybeStartDebate's claim check above. */
+export async function runDebateStage(jobId: string): Promise<void> {
+  const job = await getReportJob(jobId);
+  if (!job) {
+    console.error(`runDebateStage: job ${jobId} not found`);
+    return;
+  }
+
+  const verified = getDeepReportContent(job);
+  if (!verified) {
+    console.error(`runDebateStage: job ${jobId} has no content to debate`);
+    await updateReportJob(jobId, { status: "ready", stage: null });
+    await maybeDeliver(jobId);
+    return;
+  }
+
+  let finalContent = verified;
+  try {
+    const debate = await generateDebate(verified);
+    finalContent = { ...verified, debate };
+  } catch (err) {
+    console.error(`Debate generation failed for job ${jobId}, shipping without it:`, err);
+  }
+
+  await updateReportJob(jobId, { status: "ready", stage: null, deepReportMatches: finalContent });
+  await maybeDeliver(jobId);
 }
 
 /** No-op unless the job is genuinely paid + ready + not yet delivered.

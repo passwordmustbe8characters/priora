@@ -71,6 +71,22 @@ export interface SourceRef {
   label: string;
 }
 
+/**
+ * Section 11 — bull/bear debate. Both sides are `contentType: "synthesis"`
+ * per the spec's own tagging rule (reasoning, not sourced fact), reusing
+ * SynthesisText rather than inventing a parallel shape. Generated from
+ * two genuinely separate LLM calls (never one call asked for both
+ * sides), grounded only in the already-verified report — see debate.ts.
+ * `null` on any report generated before this feature shipped, or if
+ * debate generation failed; the spec explicitly treats this as an
+ * enhancement a report can ship without, not a required section — see
+ * template.ts, which omits the section entirely when this is null.
+ */
+export interface DebateContent {
+  bullCase: SynthesisText;
+  bearCase: SynthesisText;
+}
+
 export interface DeepReportContent {
   ideaOneLiner: string;
   executiveSummary: FactText;
@@ -82,6 +98,7 @@ export interface DeepReportContent {
   // "Gaps & Differentiation Opportunities" etc. — one or more named
   // synthesis sections beyond the market landscape one above.
   synthesisSections: SynthesisSection[];
+  debate: DebateContent | null;
   generatedAt: string;
 }
 

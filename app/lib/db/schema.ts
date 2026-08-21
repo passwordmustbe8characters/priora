@@ -237,6 +237,12 @@ export const reportJobs = pgTable(
     // on this platform.
     verificationStartedAt: timestamp("verification_started_at", { withTimezone: true }),
 
+    // Same pattern again, third stage — Section 11's bull/bear debate,
+    // which needs to run on already-verified data, so it's chained
+    // after verification the same way verification was chained after
+    // generation. See orchestrate.ts.
+    debateStartedAt: timestamp("debate_started_at", { withTimezone: true }),
+
     // Set whenever status flips to 'failed' — without this, "alert for
     // manual follow-up" (required by both the Generator and the
     // Hallucination Verification edge cases) would have nothing to

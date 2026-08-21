@@ -2,7 +2,7 @@ import { after } from "next/server";
 import type { NextRequest } from "next/server";
 import { getReportJobFresh } from "../../../../lib/db/reportJobs";
 import { checkReportBypassAccess } from "../../../../lib/report/bypassGate";
-import { maybeStartVerification } from "../../../../lib/report/orchestrate";
+import { maybeStartDebate, maybeStartVerification } from "../../../../lib/report/orchestrate";
 
 export const dynamic = "force-dynamic";
 // Needs real room now, not just a quick read — a poll landing exactly
@@ -38,9 +38,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Fire-and-continue, not awaited — the response below reports
   // whatever the job's state was at read time (still "generating"),
   // and this poll's own invocation keeps running the actual
-  // verification work after that response is sent. A no-op for every
-  // poll except the one that wins the claim.
+  // verification/debate work after that response is sent. A no-op for
+  // every poll except the one that wins the relevant claim — both
+  // checks are cheap and safe to call on every single poll regardless
+  // of which stage the job is actually at.
   after(() => maybeStartVerification(jobId));
+  after(() => maybeStartDebate(jobId));
 
   return Response.json({ status: job.status, stage: job.stage, failureReason: job.failureReason });
 }

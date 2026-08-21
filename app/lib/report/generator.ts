@@ -256,6 +256,10 @@ export async function generateDeepReport(freeVerdict: VerdictResponse, options?:
     },
     competitors,
     synthesisSections: synthesized.sections.map((s) => ({ contentType: "synthesis" as const, ...s })),
+    // Filled in by the debate stage, which runs after verification —
+    // see orchestrate.ts and debate.ts. Null here is the correct
+    // starting state, not a placeholder to fix later in this function.
+    debate: null,
     generatedAt: new Date().toISOString(),
   };
 }

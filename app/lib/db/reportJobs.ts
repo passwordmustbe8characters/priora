@@ -124,6 +124,20 @@ export async function claimVerification(id: string): Promise<boolean> {
   return Boolean(row);
 }
 
+/** Atomic claim for the verification->debate hand-off (Section 11) —
+ * same conditional-UPDATE pattern as claimVerification/claimDelivery.
+ * Whichever /status poll first observes stage="debating" with no claim
+ * yet wins it and runs runDebateStage. */
+export async function claimDebate(id: string): Promise<boolean> {
+  const db = getDb();
+  const [row] = await db
+    .update(reportJobs)
+    .set({ debateStartedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(reportJobs.id, id), isNull(reportJobs.debateStartedAt)))
+    .returning({ id: reportJobs.id });
+  return Boolean(row);
+}
+
 /** Typed accessor — deepReportMatches is stored as jsonb (no schema
  * enforcement from Postgres itself), this is the one place that casts
  * it back to the real shape rather than every caller doing so ad hoc. */
