@@ -22,6 +22,7 @@ import { VerdictSkeleton } from "./VerdictSkeleton";
 export function SearchBar({
   phase,
   result,
+  loadingMore,
   errorMessage,
   lastIdea,
   expanded,
@@ -33,6 +34,7 @@ export function SearchBar({
 }: {
   phase: Phase;
   result: VerdictResponse | null;
+  loadingMore: boolean;
   errorMessage: string | null;
   lastIdea: string;
   expanded: boolean;
@@ -150,7 +152,7 @@ export function SearchBar({
       {expanded && (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
           {phase === "loading" && <VerdictSkeleton />}
-          {phase === "result" && result && <VerdictResults result={result} />}
+          {phase === "result" && result && <VerdictResults result={result} loadingMore={loadingMore} />}
           {phase === "error" && (
             <div className="flex h-full flex-col items-start justify-center gap-3">
               <p className="font-body text-background/70">{errorMessage}</p>

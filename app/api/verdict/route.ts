@@ -1,12 +1,12 @@
 import type { NextRequest } from "next/server";
-import { runVerdictPipeline } from "../../lib/pipeline";
+import { runCachePhase } from "../../lib/pipeline";
 import { getCachedVerdict, setCachedVerdict } from "../../lib/cache";
 import { recordVerdictEvent } from "../../lib/db/analytics";
 import { checkRateLimit } from "../../lib/rateLimit";
-import type { UpsertResult } from "../../lib/db/companies";
+import type { VerdictResponse } from "../../lib/verdict";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // web search + reasoning can take a while
+export const maxDuration = 60; // reasoning-only re-score can still take a moment
 
 // This is the whole product's public entry point (no auth, no gate) —
 // the limit is sized for a real person trying several related ideas in
@@ -18,6 +18,19 @@ function errorResponse(status: number, code: string, message: string, extra?: Re
   return Response.json({ error: { code, message, ...extra } }, { status });
 }
 
+/**
+ * Cache phase only, now — see pipeline.ts's "Orchestrator" doc comment
+ * for the full two-phase design. This route never runs a live web
+ * search itself anymore; it returns whatever the DB-cache-backed
+ * Relevance Matcher can show instantly, plus `needsLiveSearch` telling
+ * the client whether to follow up with POST /api/verdict/live.
+ *
+ * The in-memory idea-level cache (getCachedVerdict/setCachedVerdict)
+ * still short-circuits everything below when it hits — it only ever
+ * stores a FINAL (post-live, or cache-alone-was-enough) result, never
+ * a partial one, so a hit here is always complete and never sets
+ * needsLiveSearch.
+ */
 export async function POST(request: NextRequest) {
   const rateLimit = await checkRateLimit(request, "verdict", RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW);
   if (!rateLimit.allowed) {
@@ -47,11 +60,11 @@ export async function POST(request: NextRequest) {
 
   if (idea.length < 10 || idea.length > 2000) {
     // Awaited, not fire-and-forget — same reasoning as the company
-    // upsert below: a serverless function can freeze the instant its
-    // response is sent, so a detached promise here risks the event
-    // never actually being written. recordVerdictEvent itself never
-    // throws (see its own doc comment), so this can't turn a validation
-    // rejection into a 500.
+    // upsert in pipeline.ts: a serverless function can freeze the
+    // instant its response is sent, so a detached promise here risks
+    // the event never actually being written. recordVerdictEvent
+    // itself never throws (see its own doc comment), so this can't
+    // turn a validation rejection into a 500.
     await recordVerdictEvent({ outcome: "validation_error" });
     return errorResponse(400, "INVALID_IDEA", "Tell us a bit more — ideas need to be at least 10 characters.");
   }
@@ -76,26 +89,42 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const debug: { cacheHit?: boolean; upsertResult?: UpsertResult; categoryTags?: string[] } = {};
-    const result = await runVerdictPipeline(idea, debug);
-    setCachedVerdict(idea, result);
-    const cacheStatus = debug.cacheHit ? "COMPANY-DB-HIT" : "MISS";
-    await recordVerdictEvent({
-      outcome: "success",
-      cacheStatus,
-      verdictStatus: result.verdict.status,
-      categoryTags: debug.categoryTags ?? [],
-    });
-    const headers: Record<string, string> = { "X-Cache": cacheStatus };
-    if (debug.upsertResult) {
-      headers["X-Cache-Write"] = `inserted=${debug.upsertResult.inserted} failed=${debug.upsertResult.failed}`;
-      if (debug.upsertResult.errors.length) {
-        headers["X-Cache-Write-Error"] = debug.upsertResult.errors[0].slice(0, 300);
-      }
+    const phase = await runCachePhase(idea);
+    const response: VerdictResponse = {
+      requestId: phase.requestId,
+      idea: phase.idea,
+      verdict: { status: phase.status, headline: phase.headline, confidence: phase.confidence },
+      matches: phase.matches,
+      bullTeaser: phase.bullTeaser,
+      bearTeaser: phase.bearTeaser,
+      generatedAt: new Date().toISOString(),
+    };
+
+    if (!phase.needsLiveSearch) {
+      // The cache alone already reached the full match cap — a
+      // complete answer, exactly like the old single-phase flow.
+      setCachedVerdict(idea, response);
+      await recordVerdictEvent({
+        outcome: "success",
+        cacheStatus: "COMPANY-DB-HIT",
+        verdictStatus: response.verdict.status,
+        categoryTags: phase.categoryTags,
+      });
+      return Response.json(response, { headers: { "X-Cache": "COMPANY-DB-HIT" } });
     }
-    return Response.json(result, { headers });
+
+    // Partial — the client renders `matches` (0 to 4 real cards) right
+    // away and is expected to call /api/verdict/live next with
+    // categoryTags below. Deliberately NOT cached at the idea level and
+    // NOT recorded as an analytics event yet — this isn't the final
+    // answer, and /api/verdict/live records the one event for this
+    // logical search once it actually is.
+    return Response.json(
+      { ...response, needsLiveSearch: true, categoryTags: phase.categoryTags },
+      { headers: { "X-Cache": phase.matches.length > 0 ? "PARTIAL" : "MISS" } },
+    );
   } catch (err) {
-    console.error("verdict pipeline failed:", err);
+    console.error("verdict cache phase failed:", err);
     await recordVerdictEvent({ outcome: "pipeline_error" });
     return errorResponse(502, "VERDICT_UNAVAILABLE", "Couldn't check that idea right now. Please try again.");
   }

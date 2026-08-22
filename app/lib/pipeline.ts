@@ -14,38 +14,35 @@ import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
  *
  *   1. normalizeIdea      — cheap, no search: idea -> category tags
  *   2. findFreshCandidates — DB lookup (see db/companies.ts)
- *   3a. cachedMatch  OR  3b. liveSearchAndMatch
- *       (enough fresh cache hits)  (not enough — pay for real search,
- *                                   then upsert results for next time)
+ *   3. cachedMatch, then (if it didn't already reach MAX_DISPLAY_MATCHES
+ *      on its own) liveSearchAndMatch to backfill the rest
  *
- * Enough fresh candidates found → skip the paid web_search call entirely
- * and just re-score what's cached (a cheap reasoning-only call). Cache
- * lookup itself is a fast indexed query, negligible next to what it's
- * there to avoid re-paying for.
+ * Cache and live search are no longer an either/or choice made in one
+ * request — see the "Orchestrator" section below (runCachePhase /
+ * runLivePhase) for why this is now two client-driven phases instead
+ * of one atomic call, and app/lib/useVerdictFlow.ts for the client
+ * side of that sequencing.
  */
 
 const MIN_CACHE_CANDIDATES = 3;
-// A second, output-side check — MIN_CACHE_CANDIDATES above only gates
-// whether the cache is even worth *trying*; this gates whether it
-// actually delivered. Confirmed live: a category can clear the input
-// bar (>=3 candidates on file, sharing genuinely relevant tags — not
-// the earlier generic-tag false-positive case) while most of them
-// still score below MIN_CACHED_MATCH_SCORE, because the DB simply
-// hasn't ingested most of the real players in that category yet (a
-// "food ordering app" search once returned only 2 matches — both from
-// one old bulk-ingestion batch — when the true market has far more).
-// Without this, a thin/stale cache silently caps what a founder ever
-// sees, forever, since nothing ever re-checks it against a live
-// search. Same threshold as the input gate, reused deliberately: the
-// cache only earns the right to skip a live search by actually
-// producing what that gate promised, not just by existing.
-const MIN_ACCEPTABLE_CACHE_MATCHES = MIN_CACHE_CANDIDATES;
 // Cache retrieval (findFreshCandidates) is a coarse tag-overlap filter,
 // not a relevance judgment — the model must score every candidate it's
 // handed, so a genuinely irrelevant one it correctly scores low would
 // otherwise still show up as a "match" just for surviving retrieval.
 // This is the actual relevance floor.
 const MIN_CACHED_MATCH_SCORE = 30;
+// The target total the free verdict aims to show. Confirmed live: a
+// category can clear MIN_CACHE_CANDIDATES (>=3 candidates on file,
+// sharing genuinely relevant tags) and still badly under-represent the
+// real market — the DB simply hasn't ingested most of the real players
+// in that category yet (a "food ordering app" search once returned
+// only 2 matches, both from one old bulk-ingestion batch, when the
+// true market has far more). Rather than discarding a partial cache
+// result outright, the cache phase shows whatever it found instantly
+// and the live phase runs alongside it (see runCachePhase/runLivePhase
+// below) purely to backfill the remaining slots up to this number —
+// never to replace what's already confirmed and shown.
+const MAX_DISPLAY_MATCHES = 5;
 
 // ---------------------------------------------------------------------
 // Stage 1: Idea Normalizer
@@ -216,7 +213,7 @@ async function cachedMatch(
     }))
     .filter((m) => m.matchScore >= MIN_CACHED_MATCH_SCORE)
     .sort((a, b) => b.matchScore - a.matchScore)
-    .slice(0, 5)
+    .slice(0, MAX_DISPLAY_MATCHES)
     .map(sanitizeMatch);
 
   return {
@@ -235,21 +232,21 @@ async function cachedMatch(
 // Stage 3b: cache miss — pay for a real live search, then cache results
 // ---------------------------------------------------------------------
 
-const LIVE_SEARCH_SYSTEM_PROMPT = `You are Priora's competitor search engine. You'll be given a founder's idea, already normalized into one clear sentence, and a set of category tags for it. You:
+const LIVE_SEARCH_SYSTEM_PROMPT = `You are Priora's competitor search engine. You'll be given a founder's idea, already normalized into one clear sentence, and a set of category tags for it. You may also be given a list of "Already-confirmed matches" found in an earlier pass and already shown to the founder — if so, treat every one of them as real and settled: never drop, contradict, or re-litigate them. Your job in that case is to find ADDITIONAL real competitors beyond that list, then judge the overall status/headline/teasers on the COMBINED picture (the given matches plus whatever new ones you find), not just on what's new. If no such list is given, judge the idea from scratch as normal. You:
 
 1. Use web search to look for real, currently-existing products or companies solving a similar problem — across multiple distinct query angles in this same pass, not just one search on the idea's own wording. Try the core problem/action in plain terms, try it with the target market or region named explicitly (e.g. adding "Nigeria" or "Africa" for a locally-focused idea), and try any obvious close synonyms for the product category — a niche or locally-specific idea often has real competitors that only surface under a differently-worded query, not the founder's own phrasing. Check well-known Western startup sources (Crunchbase, Product Hunt, Y Combinator, G2) and African startup sources (Briter Bridges, Disrupt Africa, TechCabal, Techpoint Africa, WeeTracker) where relevant to the idea's market, as well as app stores (Google Play, Apple App Store) for consumer-facing ideas — a real competitor with no press coverage still shows up there.
 2. For each real result you find, score how closely it matches the idea, 0-100.
-3. Decide an overall status:
-   - "exists" if you found two or more strong matches (score 70+)
-   - "partial_overlap" if you found something related but not a close match
+3. Decide an overall status, over the combined picture described above:
+   - "exists" if two or more matches (combined) score 70+
+   - "partial_overlap" if something scores as related but not a close match
    - "no_clear_match" if nothing meaningfully similar turned up
 4. Write the headline as one plain sentence a non-technical founder would understand — no jargon, no hedging filler.
 5. Also write two one-sentence teasers, addressed directly to the reader as "you"/"your" — a free, lightweight preview of the paid report's deeper bull/bear case, not the full case itself:
    - bullTeaser: the single strongest honest reason this could still be worth pursuing, given what you found (thin or weak competition is a legitimate reason; don't invent one if the data doesn't support it).
    - bearTeaser: the single strongest honest reason to pause and reconsider, given what you found.
-   Base both ONLY on the search results above — never introduce a new company or fact just for the teaser. Don't soften either sentence to seem balanced; each should stand as the strongest honest one-liner for its side.
+   Base both ONLY on the combined picture above — never introduce a new company or fact just for the teaser. Don't soften either sentence to seem balanced; each should stand as the strongest honest one-liner for its side.
 
-Only include matches you found real evidence for via search. Never invent a company, product, or URL. Cap matches at 5, ordered by matchScore descending. If status is "no_clear_match", matches must be an empty array.
+Only include matches you found real evidence for via search (plus any already-confirmed matches you were given). Never invent a company, product, or URL. Your returned "matches" array must include the already-confirmed ones (unchanged) plus whatever new ones you found, combined, capped at ${MAX_DISPLAY_MATCHES}, ordered by matchScore descending. If status is "no_clear_match", matches must be an empty array.
 
 For each match, also note when the search results make it reasonably clear (use null rather than guessing):
 - region: "western", "african", or "global"
@@ -323,9 +320,40 @@ interface LiveSearchOutput {
   bearTeaser: string;
 }
 
+// Deterministic, not model-trusted — the same categorical rule every
+// prompt in this file already states in English, computed in code so
+// the badge/status can never drift out of sync with the actual merged
+// match list (see mergeMatches below — the model's own "status" is a
+// judgment call made without necessarily re-deriving it correctly once
+// existing + newly-found matches are combined).
+function deriveStatus(matches: VerdictMatch[]): VerdictStatus {
+  if (matches.filter((m) => m.matchScore >= 70).length >= 2) return "exists";
+  if (matches.length > 0) return "partial_overlap";
+  return "no_clear_match";
+}
+
+// Guarantees an already-shown match can never silently vanish or change
+// underneath the founder once the live phase resolves — `existing`
+// entries always win on name collision, keeping their original
+// url/description/score exactly as already displayed; only genuinely
+// new names get appended. Case-insensitive on name since that's the
+// only stable identifier cache-sourced matches and live-search matches
+// reliably share (urls can differ — a tracked domain vs. an app-store
+// listing for the same company, for instance).
+function mergeMatches(existing: VerdictMatch[], found: VerdictMatch[]): VerdictMatch[] {
+  const byName = new Map<string, VerdictMatch>();
+  for (const m of existing) byName.set(m.name.trim().toLowerCase(), m);
+  for (const m of found) {
+    const key = m.name.trim().toLowerCase();
+    if (!byName.has(key)) byName.set(key, m);
+  }
+  return [...byName.values()].sort((a, b) => b.matchScore - a.matchScore).slice(0, MAX_DISPLAY_MATCHES);
+}
+
 async function liveSearchAndMatch(
   normalizedIdea: string,
   categoryTags: string[],
+  existingMatches: VerdictMatch[] = [],
 ): Promise<{
   status: VerdictStatus;
   headline: string;
@@ -336,6 +364,10 @@ async function liveSearchAndMatch(
   bearTeaser: string | null;
 }> {
   const client = getOpenAI();
+
+  const existingBlock = existingMatches.length
+    ? `\n\nAlready-confirmed matches from an earlier pass (keep these in your final matches list; find additional real competitors beyond them):\n${existingMatches.map((m, i) => `${i + 1}. ${m.name} — ${m.description}`).join("\n")}`
+    : "";
 
   const response = await client.responses.create({
     model: VERDICT_MODEL,
@@ -354,7 +386,7 @@ async function liveSearchAndMatch(
     reasoning: { effort: "low" },
     input: [
       { role: "system", content: LIVE_SEARCH_SYSTEM_PROMPT },
-      { role: "user", content: `Idea: ${normalizedIdea}\nCategory tags: ${categoryTags.join(", ")}` },
+      { role: "user", content: `Idea: ${normalizedIdea}\nCategory tags: ${categoryTags.join(", ")}${existingBlock}` },
     ],
     text: {
       format: { type: "json_schema", name: "live_search", schema: LIVE_SEARCH_SCHEMA, strict: true },
@@ -365,11 +397,14 @@ async function liveSearchAndMatch(
   if (!raw) throw new Error("Empty response from live search");
   const parsed = JSON.parse(raw) as LiveSearchOutput;
 
-  const matches = parsed.matches
+  const found = parsed.matches
     .map((m) => sanitizeMatch({ name: m.name, url: m.url, description: m.description, source: m.source, matchScore: m.matchScore }));
+  // Merged in code, not just trusted from the model's own returned list
+  // — see mergeMatches' doc comment above.
+  const matches = mergeMatches(existingMatches, found);
 
   return {
-    status: parsed.status,
+    status: deriveStatus(matches),
     headline: parsed.headline,
     confidence: parsed.confidence,
     matches,
@@ -380,81 +415,138 @@ async function liveSearchAndMatch(
 }
 
 // ---------------------------------------------------------------------
-// Orchestrator
+// Orchestrator — two client-driven phases, not one atomic call
 // ---------------------------------------------------------------------
+//
+// Cache-then-live used to be an either/or choice made entirely inside
+// one request: enough fresh cache candidates meant live search never
+// ran at all; not enough meant the cache was discarded and live search
+// ran alone. That kept cost down but meant the founder waited through
+// a full live search (or a wrong/incomplete cache result) before
+// seeing anything.
+//
+// Now it's two separate calls the CLIENT drives, same "client-poll-
+// triggered stage" pattern this codebase already uses for the paid
+// report's multi-stage pipeline (see report/orchestrate.ts) rather
+// than a server-side background job or a streaming response — it's a
+// pattern already proven here, not a new one:
+//
+//   1. runCachePhase — fast, no search. Returns whatever the cache
+//      scores as real matches (0 to MAX_DISPLAY_MATCHES) instantly, so
+//      the UI can render real match cards the moment this resolves.
+//   2. runLivePhase — only called by the client when phase 1 says
+//      needsLiveSearch (cache didn't already reach MAX_DISPLAY_MATCHES
+//      on its own). Runs a live search to backfill the REMAINING
+//      slots — never to replace what phase 1 already showed, see
+//      mergeMatches above — and returns the final, complete answer.
+//
+// See app/api/verdict/route.ts (phase 1) and
+// app/api/verdict/live/route.ts (phase 2) for the HTTP side of this,
+// and app/lib/useVerdictFlow.ts for how the client sequences them.
 
-export async function runVerdictPipeline(
-  rawIdea: string,
-  debug?: { cacheHit?: boolean; upsertResult?: UpsertResult; categoryTags?: string[] },
-): Promise<VerdictResponse> {
+export interface CachePhaseResult {
+  requestId: string;
+  idea: { raw: string; normalized: string };
+  categoryTags: string[];
+  status: VerdictStatus;
+  headline: string;
+  confidence: number;
+  matches: VerdictMatch[];
+  bullTeaser: string | null;
+  bearTeaser: string | null;
+  // True whenever matches.length < MAX_DISPLAY_MATCHES — the client's
+  // signal to run the live phase next. When true AND matches is empty,
+  // status/headline/confidence below are inert placeholders (there was
+  // nothing to judge yet), not a real "no match" verdict — the caller
+  // must gate on this flag, not read those fields literally, until the
+  // live phase resolves.
+  needsLiveSearch: boolean;
+}
+
+export async function runCachePhase(rawIdea: string): Promise<CachePhaseResult> {
   const normalized = await normalizeIdea(rawIdea);
-  if (debug) debug.categoryTags = normalized.categoryTags;
-
   const cached = await findFreshCandidates(normalized.categoryTags, 10);
 
-  let result: {
-    status: VerdictStatus;
-    headline: string;
-    confidence: number;
-    matches: VerdictMatch[];
-    bullTeaser: string | null;
-    bearTeaser: string | null;
-  };
+  const base = { requestId: crypto.randomUUID(), idea: { raw: rawIdea, normalized: normalized.normalizedIdea }, categoryTags: normalized.categoryTags };
 
-  // Try the cache first if it looks promising, but don't just trust
-  // that promise — cachedMatch itself is what actually proves whether
-  // the candidates it was handed were real matches or not. See
-  // MIN_ACCEPTABLE_CACHE_MATCHES above for why the result also has to
-  // clear a bar, not just the candidate count going in.
-  const cacheResult =
-    cached.length >= MIN_CACHE_CANDIDATES ? await cachedMatch(normalized.normalizedIdea, cached) : null;
-
-  if (cacheResult && cacheResult.matches.length >= MIN_ACCEPTABLE_CACHE_MATCHES) {
-    if (debug) debug.cacheHit = true;
-    result = cacheResult;
-  } else {
-    if (debug) debug.cacheHit = false;
-    const live = await liveSearchAndMatch(normalized.normalizedIdea, normalized.categoryTags);
-    result = live;
-
-    // Deeper research fields (business model, positioning, weaknesses,
-    // etc.) are deliberately left unset here — that's Phase 3's Deep
-    // Report Generator's job, which does 2-3 additional targeted passes.
-    // This upsert only captures what a single low-context search pass
-    // can reliably ground in real results.
-    //
-    // Awaited, not fire-and-forget: a serverless function can freeze or
-    // get torn down the instant its response is sent, so a detached
-    // promise here risks the cache write never actually completing.
-    // Reports back via `debug` rather than throwing — a cache-write
-    // failure shouldn't fail the request; the founder still gets their
-    // verdict even if caching this round didn't work.
-    const upsertResult = await upsertCompanies(
-      live.raw.map((m) => ({
-        name: m.name,
-        description: m.description,
-        url: m.url || null,
-        source: m.source,
-        region: m.region ?? "global",
-        country: m.country,
-        categoryTags: normalized.categoryTags,
-        pricing: m.pricing,
-        fundingStage: m.fundingStage,
-      })),
-    );
-    if (upsertResult.failed > 0) {
-      console.error("company cache upsert had failures:", upsertResult.errors);
-    }
-    if (debug) debug.upsertResult = upsertResult;
+  if (cached.length < MIN_CACHE_CANDIDATES) {
+    return {
+      ...base,
+      status: "no_clear_match",
+      headline: "",
+      confidence: 0,
+      matches: [],
+      bullTeaser: null,
+      bearTeaser: null,
+      needsLiveSearch: true,
+    };
   }
+
+  const cacheResult = await cachedMatch(normalized.normalizedIdea, cached);
+  return {
+    ...base,
+    status: cacheResult.status,
+    headline: cacheResult.headline,
+    confidence: cacheResult.confidence,
+    matches: cacheResult.matches,
+    bullTeaser: cacheResult.bullTeaser,
+    bearTeaser: cacheResult.bearTeaser,
+    needsLiveSearch: cacheResult.matches.length < MAX_DISPLAY_MATCHES,
+  };
+}
+
+export interface LivePhaseInput {
+  ideaRaw: string;
+  normalizedIdea: string;
+  categoryTags: string[];
+  // Whatever runCachePhase already found and the client already
+  // rendered — always kept as-is in the final result, see
+  // mergeMatches. Empty when the cache had nothing at all.
+  existingMatches: VerdictMatch[];
+}
+
+export async function runLivePhase(input: LivePhaseInput, debug?: { upsertResult?: UpsertResult }): Promise<VerdictResponse> {
+  const live = await liveSearchAndMatch(input.normalizedIdea, input.categoryTags, input.existingMatches);
+
+  // Deeper research fields (business model, positioning, weaknesses,
+  // etc.) are deliberately left unset here — that's Phase 3's Deep
+  // Report Generator's job, which does 2-3 additional targeted passes.
+  // This upsert only captures what a single medium-context search pass
+  // can reliably ground in real results, and only the genuinely NEW
+  // companies this call found (live.raw) — existingMatches came from
+  // the cache and are already in the DB.
+  //
+  // Awaited, not fire-and-forget: a serverless function can freeze or
+  // get torn down the instant its response is sent, so a detached
+  // promise here risks the cache write never actually completing.
+  // Reports back via `debug` rather than throwing — a cache-write
+  // failure shouldn't fail the request; the founder still gets their
+  // verdict even if caching this round didn't work.
+  const upsertResult = await upsertCompanies(
+    live.raw.map((m) => ({
+      name: m.name,
+      description: m.description,
+      url: m.url || null,
+      source: m.source,
+      region: m.region ?? "global",
+      country: m.country,
+      categoryTags: input.categoryTags,
+      pricing: m.pricing,
+      fundingStage: m.fundingStage,
+    })),
+  );
+  if (upsertResult.failed > 0) {
+    console.error("company cache upsert had failures:", upsertResult.errors);
+  }
+  if (debug) debug.upsertResult = upsertResult;
 
   return {
     requestId: crypto.randomUUID(),
-    idea: { raw: rawIdea, normalized: normalized.normalizedIdea },
-    verdict: { status: result.status, headline: result.headline, confidence: result.confidence },
-    matches: result.matches,
-    bullTeaser: result.bullTeaser,
-    bearTeaser: result.bearTeaser,
+    idea: { raw: input.ideaRaw, normalized: input.normalizedIdea },
+    verdict: { status: live.status, headline: live.headline, confidence: live.confidence },
+    matches: live.matches,
+    bullTeaser: live.bullTeaser,
+    bearTeaser: live.bearTeaser,
     generatedAt: new Date().toISOString(),
   };
 }

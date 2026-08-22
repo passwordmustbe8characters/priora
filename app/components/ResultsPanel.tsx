@@ -23,6 +23,7 @@ export function ResultsPanel({
   open,
   phase,
   result,
+  loadingMore,
   errorMessage,
   onClose,
   onRetry,
@@ -30,6 +31,7 @@ export function ResultsPanel({
   open: boolean;
   phase: Phase;
   result: VerdictResponse | null;
+  loadingMore: boolean;
   errorMessage: string | null;
   onClose: () => void;
   onRetry: () => void;
@@ -62,7 +64,7 @@ export function ResultsPanel({
 
         <div className="mt-6 min-h-0 flex-1 overflow-y-auto">
           {phase === "loading" && <VerdictSkeleton />}
-          {phase === "result" && result && <VerdictDetail result={result} />}
+          {phase === "result" && result && <VerdictDetail result={result} loadingMore={loadingMore} />}
           {phase === "error" && (
             <div className="flex h-full flex-col items-start justify-center gap-3">
               <p className="font-body text-background/70">{errorMessage}</p>

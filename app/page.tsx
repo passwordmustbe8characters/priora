@@ -91,6 +91,7 @@ export default function Home() {
         <SearchBar
           phase={flow.phase}
           result={flow.result}
+          loadingMore={flow.loadingMore}
           errorMessage={flow.errorMessage}
           lastIdea={flow.lastIdea}
           expanded={searchExpanded}
@@ -106,6 +107,7 @@ export default function Home() {
         open={panelOpen}
         phase={flow.phase}
         result={flow.result}
+        loadingMore={flow.loadingMore}
         errorMessage={flow.errorMessage}
         // Mobile has no separate compact card to fall back to — closing
         // the panel there is closing the only results surface that

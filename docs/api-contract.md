@@ -10,13 +10,16 @@ A mock implementation living at `app/api/verdict/route.ts` returns data in
 this exact shape today, so the frontend can integrate against something
 real before the backend pipeline exists.
 
-## Pipeline (internal, not separate endpoints)
+## Pipeline — two endpoints, cache-then-live
 
-One public endpoint fronts the internal pipeline. As of Phase 2's Caching
-Layer, this branches on whether fresh cached candidates exist — full
-detail (freshness window, what triggers a cache hit vs miss) is in
-[db-schema.md](./db-schema.md). The request/response contract below is
-unchanged either way; the branching is invisible to the frontend.
+As of the cache-then-live progressive search rework, this is genuinely
+TWO public endpoints, not one — the branching used to be invisible to
+the frontend (an either/or choice made entirely server-side in one
+request); it no longer is, because the whole point now is to show the
+founder real cache-backed matches instantly rather than making them
+wait through a live search that might not even be needed. Full detail
+(freshness window, what counts as "enough" cached candidates) is in
+[db-schema.md](./db-schema.md).
 
 ```
 raw idea text
@@ -27,21 +30,31 @@ raw idea text
      ▼
 2. Cache lookup       → companies table, filtered by category tag overlap
      │                  + freshness window
-     │
-     ├─ enough fresh matches ──► 3a. Relevance Matcher (cache)
-     │                            re-scores cached candidates, no search
-     │
-     └─ not enough ────────────► 3b. Candidate Retrieval + Relevance
-                                     Matcher (live) — paid web search,
-                                     then upserts results into the cache
-                                     for next time
+     ▼
+3. Relevance Matcher (cache) → re-scores cached candidates, no search
      │
      ▼
-4. Free Verdict Assembly → composes status + headline + top matches
-     │                      into the response below
+POST /api/verdict responds HERE — with whatever real matches the cache
+found (0 to 5) and needsLiveSearch: true if that's fewer than 5.
+     │
+     │  (only if needsLiveSearch was true)
      ▼
-  response
+4. Client calls POST /api/verdict/live, passing back the matches
+   already shown — Candidate Retrieval + Relevance Matcher (live), a
+   paid web search that finds ADDITIONAL competitors beyond that list,
+   never replaces what's already confirmed (see pipeline.ts's
+   mergeMatches), then upserts newly-found companies into the cache.
+     │
+     ▼
+5. Free Verdict Assembly → composes the final status + headline + full
+     │                      match list into the response below
+     ▼
+  final response
 ```
+
+The response shape below is identical from both endpoints — the only
+difference is `needsLiveSearch`/`categoryTags`, present only on a
+partial (cache-phase) response, absent on a final one.
 
 ## `POST /api/verdict`
 
@@ -105,6 +118,17 @@ The only endpoint the Idea Input Flow calls.
 | `bullTeaser`                            | string \| null                                      | Free Verdict Teaser — one-sentence case to proceed, from the same Relevance Matcher call that produced `matches` (no extra search/LLM call); `null` on older verdicts or if the matcher omitted it |
 | `bearTeaser`                            | string \| null                                      | one-sentence case to reconsider, same origin/nullability as `bullTeaser` |
 | `generatedAt`                           | string (ISO 8601)                                   | when the verdict was assembled                                        |
+| `needsLiveSearch`                       | boolean, optional                                   | present (`true`) only on a partial, cache-phase response — tells the client to call `POST /api/verdict/live` next. Absent on any final response |
+| `categoryTags`                          | string[], optional                                  | present only alongside `needsLiveSearch: true` — pass straight through to `/api/verdict/live` so it doesn't re-run the Idea Normalizer |
+
+### `POST /api/verdict/live` — phase 2, only called when `needsLiveSearch` was true
+
+Request body: `{ ideaRaw, normalizedIdea, categoryTags, existingMatches }` —
+`existingMatches` is whatever `matches` the cache phase already returned
+(shown to the founder already); the live phase keeps every one of them
+unchanged and only adds genuinely new competitors it finds via search,
+capped at 5 total. Response shape is the same `VerdictResponse` above,
+always final (no `needsLiveSearch`/`categoryTags` on the way out).
 
 ### Error responses
 

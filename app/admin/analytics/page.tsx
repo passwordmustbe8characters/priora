@@ -31,6 +31,10 @@ const PERIODS = [7, 30, 90] as const;
 const CACHE_LABELS: Record<string, string> = {
   HIT: "In-memory cache",
   "COMPANY-DB-HIT": "Company DB cache",
+  // Cache-then-live progressive search: the DB cache found SOME real
+  // matches instantly, and a live search then backfilled the rest —
+  // see pipeline.ts's "Orchestrator" doc comment.
+  MIXED: "Cache + live search",
   MISS: "Live search",
   none: "N/A (errored before cache check)",
 };

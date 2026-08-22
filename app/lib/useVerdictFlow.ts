@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { submitIdea, VerdictError, type VerdictResponse } from "./verdict";
+import { useRef, useState } from "react";
+import { submitIdea, submitIdeaLive, VerdictError, type VerdictResponse } from "./verdict";
 
 export type Phase = "idle" | "active" | "loading" | "result" | "error";
 
@@ -13,12 +13,25 @@ export type Phase = "idle" | "active" | "loading" | "result" | "error";
  * own or care which DOM node the text came from. `lastIdea` is exposed so
  * whichever input renders next (e.g. the panel opening) can be
  * pre-filled with what was actually submitted.
+ *
+ * Cache-then-live is two requests now, not one (see pipeline.ts's
+ * "Orchestrator" doc comment) — `submit` awaits only the fast cache
+ * phase before flipping to `phase: "result"`. If that response says
+ * `needsLiveSearch`, `result` is still shown (whatever real matches the
+ * cache already found) with `loadingMore: true` alongside it, and the
+ * live phase is kicked off in the background; `result` is swapped for
+ * the complete answer and `loadingMore` clears once it resolves. A
+ * generation counter (not a boolean "is a request in flight") guards
+ * against a stale live-phase response landing after the user has
+ * already started a whole new search — see `submit`.
  */
 export function useVerdictFlow() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<VerdictResponse | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastIdea, setLastIdea] = useState("");
+  const generationRef = useRef(0);
 
   const activate = () => {
     if (phase === "idle") setPhase("active");
@@ -48,22 +61,55 @@ export function useVerdictFlow() {
     }
     setErrorMessage(null);
     setPhase("loading");
+    setLoadingMore(false);
+    // Bumped on every new submit — a live-phase response only gets
+    // applied if this hasn't moved on since, so a slow phase 2 from an
+    // abandoned search can never clobber a result the user has already
+    // moved past (a fresh submit, or a reset).
+    const generation = ++generationRef.current;
+
     try {
       const data = await submitIdea(idea);
+      if (generation !== generationRef.current) return;
       setResult(data);
       setPhase("result");
+
+      if (data.needsLiveSearch) {
+        setLoadingMore(true);
+        try {
+          const finalData = await submitIdeaLive({
+            ideaRaw: idea,
+            normalizedIdea: data.idea.normalized,
+            categoryTags: data.categoryTags ?? [],
+            existingMatches: data.matches,
+          });
+          if (generation !== generationRef.current) return;
+          setResult(finalData);
+        } catch {
+          // The live phase failing shouldn't take away the real,
+          // already-shown cache matches — same "a later stage failing
+          // doesn't invalidate what already succeeded" principle as the
+          // paid report's own multi-stage pipeline. Silently stop
+          // waiting; whatever the cache phase found stays on screen.
+        } finally {
+          if (generation === generationRef.current) setLoadingMore(false);
+        }
+      }
     } catch (err) {
+      if (generation !== generationRef.current) return;
       setErrorMessage(err instanceof VerdictError ? err.message : "Something went wrong. Try again.");
       setPhase("error");
     }
   };
 
   const reset = () => {
+    generationRef.current++;
     setResult(null);
+    setLoadingMore(false);
     setErrorMessage(null);
     setLastIdea("");
     setPhase("idle");
   };
 
-  return { phase, result, errorMessage, lastIdea, activate, cancel, submit, reset, clearErrorOnEdit };
+  return { phase, result, loadingMore, errorMessage, lastIdea, activate, cancel, submit, reset, clearErrorOnEdit };
 }

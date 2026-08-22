@@ -1,28 +1,39 @@
 import { GetReportButton } from "./GetReportButton";
-import type { VerdictResponse } from "../lib/verdict";
+import { MAX_DISPLAY_MATCHES, type VerdictResponse } from "../lib/verdict";
 
 /** The side panel's view — same data as the in-place preview card
  * (VerdictResults), but a bit more room to breathe: full descriptions
  * instead of line-clamped, one column instead of a grid, and the
  * confidence score surfaced (not shown in the compact preview). Not a
- * different report, just a little more detail on the same matches. */
-export function VerdictDetail({ result }: { result: VerdictResponse }) {
+ * different report, just a little more detail on the same matches.
+ *
+ * `loadingMore` — see VerdictResults' doc comment; same cache-then-live
+ * progressive behavior, just rendered as list rows instead of a grid. */
+export function VerdictDetail({ result, loadingMore = false }: { result: VerdictResponse; loadingMore?: boolean }) {
+  const remaining = loadingMore ? Math.max(0, MAX_DISPLAY_MATCHES - result.matches.length) : 0;
+  const stillFullyLoading = loadingMore && result.matches.length === 0;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <p className="font-body text-xs text-background/50 sm:text-sm">
         <span className="text-background/80">{result.idea.normalized}</span>
       </p>
 
-      <div className="mt-1 flex items-start justify-between gap-4">
-        <h2 className="font-display text-lg leading-tight font-bold text-background sm:text-2xl">
-          {result.verdict.headline}
-        </h2>
-        <span className="font-body shrink-0 rounded-full bg-background/10 px-3 py-1 text-xs font-semibold text-background/70">
-          {Math.round(result.verdict.confidence * 100)}% confidence
-        </span>
-      </div>
+      {/* Suppressed while still-empty-and-loading-more — see
+          VerdictResults for why a "no match"/confidence readout
+          shouldn't render before there's anything to actually judge. */}
+      {!stillFullyLoading && (
+        <div className="mt-1 flex items-start justify-between gap-4">
+          <h2 className="font-display text-lg leading-tight font-bold text-background sm:text-2xl">
+            {result.verdict.headline}
+          </h2>
+          <span className="font-body shrink-0 rounded-full bg-background/10 px-3 py-1 text-xs font-semibold text-background/70">
+            {Math.round(result.verdict.confidence * 100)}% confidence
+          </span>
+        </div>
+      )}
 
-      {result.matches.length > 0 ? (
+      {result.matches.length > 0 || remaining > 0 ? (
         <ul className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
           {result.matches.map((match) => (
             <li key={match.url}>
@@ -46,6 +57,9 @@ export function VerdictDetail({ result }: { result: VerdictResponse }) {
                 </span>
               </a>
             </li>
+          ))}
+          {Array.from({ length: remaining }).map((_, i) => (
+            <li key={`skeleton-${i}`} className="h-20 animate-pulse rounded-2xl bg-background/5" aria-hidden />
           ))}
         </ul>
       ) : (
