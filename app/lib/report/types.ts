@@ -51,9 +51,21 @@ export interface CompetitorProfile {
   // every other field here. targetUser above already covers "target
   // customer segment," so that ask from the spec isn't a new field.
   foundedYear: string | null; // e.g. "2019" — a string, not a number: source text sometimes gives "founded in early 2019" etc., no need to force-parse
-  headquarters: string | null; // HQ / primary market, e.g. "Lagos, Nigeria"
+  headquarters: string | null; // HQ / primary market, e.g. "Lagos, Nigeria" — free text, not categorical; see `region` below for the badge-friendly version
   namedInvestors: string | null; // distinct from fundingStage (round type, e.g. "Series A") — actual investor names when stated
-  differentiator: string | null; // one sentence, only if the source text states one directly — never inferred
+  // Section 12, Fix 3 — a canonical, badge-renderable version of what
+  // `headquarters` only states as free text. Mirrors Phase 1's own
+  // LiveMatch.region enum exactly (same three buckets) rather than
+  // inventing a new vocabulary — deliberately NOT derived from
+  // `headquarters` via string-matching in code, since guessing "Lagos,
+  // Nigeria" -> African from a keyword list is exactly the kind of
+  // ungrounded inference this report's own hallucination-control rule
+  // exists to prevent. Same research call, same "null over guessing"
+  // discipline as every other field here. Never used to filter or
+  // suppress a competitor (see deriveMarketStats / Section 12, Fix 5 —
+  // the market toggle changes narrative framing only, never retrieval).
+  region: "western" | "african" | "global" | null;
+  differentiator: string | null; // one sentence, only if it states something genuinely NOT already captured in `description` — a quote that just restates the description is padding, not depth (Section 12, Fix 4), so leave this null in that case rather than including it anyway
   sourceUrl: string;
   sourceLabel: string; // short display label for the link, e.g. "Official website"
   // Ground truth for verification — same role as FactText.sourceSnippet.

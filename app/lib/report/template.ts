@@ -80,6 +80,7 @@ const TEMPLATE_CSS = `
   .badge { font-family: 'Helvetica', sans-serif; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; font-weight: bold; vertical-align: middle; }
   .badge.direct { background: #e8d9c8; color: #6b4a1f; }
   .badge.adjacent { background: #efece4; color: #6b6255; }
+  .badge.region { background: #e5e9e0; color: #445c3a; }
   .profile-meta { font-family: 'Helvetica', sans-serif; font-size: 8.5pt; color: #6b6255; margin-top: 4px; }
   .profile-desc { margin-top: 8px; font-size: 9.5pt; }
   .profile-source { font-family: 'Helvetica', sans-serif; font-size: 8pt; color: #8a6c3f; margin-top: 6px; }
@@ -111,6 +112,19 @@ const TEMPLATE_CSS = `
   .sources-list li { margin-bottom: 4px; }
 `;
 
+// Section 12, Fix 3 — the market-origin badge the spec asked for.
+// Deliberately a lookup over the canonical `region` enum, never a
+// heuristic over the free-text `headquarters` field — see that field's
+// own doc comment in types.ts for why guessing from a string would be
+// exactly the kind of ungrounded inference this report avoids
+// elsewhere. Null renders no badge at all rather than an "Unknown" one.
+function regionBadgeLabel(region: CompetitorProfile["region"]): string | null {
+  if (region === "african") return "Africa-focused";
+  if (region === "western") return "Western";
+  if (region === "global") return "Global";
+  return null;
+}
+
 function competitorCard(c: CompetitorProfile, escapedNames: string[]): string {
   // Phase 3, Section 10, Technique 1 — same fields as before plus the
   // wider extraction schema's new ones, folded into the same meta line
@@ -126,9 +140,10 @@ function competitorCard(c: CompetitorProfile, escapedNames: string[]): string {
   ]
     .filter((v): v is string => Boolean(v))
     .map(escapeHtml);
+  const regionLabel = regionBadgeLabel(c.region);
   return `
     <div class="profile-card ${c.category}">
-      <span class="profile-name">${escapeHtml(c.companyName)}</span><span class="badge ${c.category}">${c.category === "direct" ? "Direct" : "Adjacent"}</span>
+      <span class="profile-name">${escapeHtml(c.companyName)}</span><span class="badge ${c.category}">${c.category === "direct" ? "Direct" : "Adjacent"}</span>${regionLabel ? `<span class="badge region">${escapeHtml(regionLabel)}</span>` : ""}
       ${metaParts.length ? `<div class="profile-meta">${metaParts.join(" &middot; ")}</div>` : ""}
       <div class="profile-desc">${boldCompanyNames(escapeHtml(c.description), escapedNames)}</div>
       ${c.differentiator ? `<div class="profile-differentiator">&ldquo;${boldCompanyNames(escapeHtml(c.differentiator), escapedNames)}&rdquo;</div>` : ""}
