@@ -17,6 +17,15 @@ export interface VerdictResponse {
   idea: { raw: string; normalized: string };
   verdict: { status: VerdictStatus; headline: string; confidence: number };
   matches: VerdictMatch[];
+  // Free Verdict Teaser (Phase 3, Section 11's free-tier half) — one
+  // honest sentence each for the case to proceed and the case to
+  // reconsider, produced by the same Relevance Matcher call that
+  // already scored `matches` (no extra search, no extra LLM call).
+  // Null only for a verdict generated before this shipped, or if the
+  // matcher's own response happened to omit them — never something the
+  // frontend should treat as an error, just skip rendering the teaser.
+  bullTeaser: string | null;
+  bearTeaser: string | null;
   generatedAt: string;
 }
 

@@ -144,7 +144,12 @@ Then decide an overall status:
 - "partial_overlap" if something scores as related but not a close match
 - "no_clear_match" if nothing meaningfully similar
 
-Write the headline as one plain sentence a non-technical founder would understand — no jargon, no hedging filler. Return a score for every candidate you were given, in the same order.`;
+Write the headline as one plain sentence a non-technical founder would understand — no jargon, no hedging filler. Return a score for every candidate you were given, in the same order.
+
+Also write two one-sentence teasers, addressed directly to the reader as "you"/"your" — a free, lightweight preview of the paid report's deeper bull/bear case, not the full case itself:
+- bullTeaser: the single strongest honest reason this could still be worth pursuing, given the candidates above (thin or weak competition is a legitimate reason; don't invent one if the data doesn't support it).
+- bearTeaser: the single strongest honest reason to pause and reconsider, given the candidates above.
+Base both ONLY on the candidates and scores you just produced — never introduce a new company or fact. Don't soften either sentence to seem balanced; each should stand as the strongest honest one-liner for its side.`;
 
 const CACHED_MATCH_SCHEMA = {
   type: "object" as const,
@@ -153,8 +158,10 @@ const CACHED_MATCH_SCHEMA = {
     headline: { type: "string" as const },
     confidence: { type: "number" as const },
     scores: { type: "array" as const, items: { type: "number" as const } },
+    bullTeaser: { type: "string" as const },
+    bearTeaser: { type: "string" as const },
   },
-  required: ["status", "headline", "confidence", "scores"],
+  required: ["status", "headline", "confidence", "scores", "bullTeaser", "bearTeaser"],
   additionalProperties: false,
 };
 
@@ -163,12 +170,21 @@ interface CachedMatchOutput {
   headline: string;
   confidence: number;
   scores: number[];
+  bullTeaser: string;
+  bearTeaser: string;
 }
 
 async function cachedMatch(
   normalizedIdea: string,
   candidates: Company[],
-): Promise<{ status: VerdictStatus; headline: string; confidence: number; matches: VerdictMatch[] }> {
+): Promise<{
+  status: VerdictStatus;
+  headline: string;
+  confidence: number;
+  matches: VerdictMatch[];
+  bullTeaser: string | null;
+  bearTeaser: string | null;
+}> {
   const client = getOpenAI();
   const candidateList = candidates
     .map((c, i) => `${i + 1}. ${c.name} — ${c.description}`)
@@ -203,7 +219,16 @@ async function cachedMatch(
     .slice(0, 5)
     .map(sanitizeMatch);
 
-  return { status: parsed.status, headline: parsed.headline, confidence: parsed.confidence, matches };
+  return {
+    status: parsed.status,
+    headline: parsed.headline,
+    confidence: parsed.confidence,
+    matches,
+    // trim() -> null rather than trusting an empty string through to the
+    // UI as a rendered-but-blank teaser box.
+    bullTeaser: parsed.bullTeaser?.trim() || null,
+    bearTeaser: parsed.bearTeaser?.trim() || null,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -219,6 +244,10 @@ const LIVE_SEARCH_SYSTEM_PROMPT = `You are Priora's competitor search engine. Yo
    - "partial_overlap" if you found something related but not a close match
    - "no_clear_match" if nothing meaningfully similar turned up
 4. Write the headline as one plain sentence a non-technical founder would understand — no jargon, no hedging filler.
+5. Also write two one-sentence teasers, addressed directly to the reader as "you"/"your" — a free, lightweight preview of the paid report's deeper bull/bear case, not the full case itself:
+   - bullTeaser: the single strongest honest reason this could still be worth pursuing, given what you found (thin or weak competition is a legitimate reason; don't invent one if the data doesn't support it).
+   - bearTeaser: the single strongest honest reason to pause and reconsider, given what you found.
+   Base both ONLY on the search results above — never introduce a new company or fact just for the teaser. Don't soften either sentence to seem balanced; each should stand as the strongest honest one-liner for its side.
 
 Only include matches you found real evidence for via search. Never invent a company, product, or URL. Cap matches at 5, ordered by matchScore descending. If status is "no_clear_match", matches must be an empty array.
 
@@ -266,8 +295,10 @@ const LIVE_SEARCH_SCHEMA = {
         additionalProperties: false,
       },
     },
+    bullTeaser: { type: "string" as const },
+    bearTeaser: { type: "string" as const },
   },
-  required: ["status", "headline", "confidence", "matches"],
+  required: ["status", "headline", "confidence", "matches", "bullTeaser", "bearTeaser"],
   additionalProperties: false,
 };
 
@@ -288,12 +319,22 @@ interface LiveSearchOutput {
   headline: string;
   confidence: number;
   matches: LiveMatch[];
+  bullTeaser: string;
+  bearTeaser: string;
 }
 
 async function liveSearchAndMatch(
   normalizedIdea: string,
   categoryTags: string[],
-): Promise<{ status: VerdictStatus; headline: string; confidence: number; matches: VerdictMatch[]; raw: LiveMatch[] }> {
+): Promise<{
+  status: VerdictStatus;
+  headline: string;
+  confidence: number;
+  matches: VerdictMatch[];
+  raw: LiveMatch[];
+  bullTeaser: string | null;
+  bearTeaser: string | null;
+}> {
   const client = getOpenAI();
 
   const response = await client.responses.create({
@@ -327,7 +368,15 @@ async function liveSearchAndMatch(
   const matches = parsed.matches
     .map((m) => sanitizeMatch({ name: m.name, url: m.url, description: m.description, source: m.source, matchScore: m.matchScore }));
 
-  return { status: parsed.status, headline: parsed.headline, confidence: parsed.confidence, matches, raw: parsed.matches };
+  return {
+    status: parsed.status,
+    headline: parsed.headline,
+    confidence: parsed.confidence,
+    matches,
+    raw: parsed.matches,
+    bullTeaser: parsed.bullTeaser?.trim() || null,
+    bearTeaser: parsed.bearTeaser?.trim() || null,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -343,7 +392,14 @@ export async function runVerdictPipeline(
 
   const cached = await findFreshCandidates(normalized.categoryTags, 10);
 
-  let result: { status: VerdictStatus; headline: string; confidence: number; matches: VerdictMatch[] };
+  let result: {
+    status: VerdictStatus;
+    headline: string;
+    confidence: number;
+    matches: VerdictMatch[];
+    bullTeaser: string | null;
+    bearTeaser: string | null;
+  };
 
   // Try the cache first if it looks promising, but don't just trust
   // that promise — cachedMatch itself is what actually proves whether
@@ -397,6 +453,8 @@ export async function runVerdictPipeline(
     idea: { raw: rawIdea, normalized: normalized.normalizedIdea },
     verdict: { status: result.status, headline: result.headline, confidence: result.confidence },
     matches: result.matches,
+    bullTeaser: result.bullTeaser,
+    bearTeaser: result.bearTeaser,
     generatedAt: new Date().toISOString(),
   };
 }

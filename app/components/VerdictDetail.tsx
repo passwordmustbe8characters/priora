@@ -55,6 +55,35 @@ export function VerdictDetail({ result }: { result: VerdictResponse }) {
         </p>
       )}
 
+      {/* Free Verdict Teaser — one honest sentence each for the case to
+          proceed and the case to reconsider, produced by the same call
+          that already scored the matches above (no extra search, no
+          extra LLM call). A free, lightweight preview of the paid
+          report's own "The Case For / The Case Against" section, named
+          the same way on purpose — the fuller version lives one tap
+          below. Not flex-1: this stays visible alongside the CTA rather
+          than scrolling away with a long match list. */}
+      {(result.bullTeaser || result.bearTeaser) && (
+        <div className="mt-4 grid shrink-0 gap-3 sm:grid-cols-2">
+          {result.bullTeaser && (
+            <div className="rounded-2xl border border-background/10 bg-background/5 p-4">
+              <span className="font-body text-xs font-semibold tracking-wide text-background/50 uppercase">
+                The case for
+              </span>
+              <p className="font-body mt-1.5 text-sm text-background/80">{result.bullTeaser}</p>
+            </div>
+          )}
+          {result.bearTeaser && (
+            <div className="rounded-2xl border border-background/10 bg-background/5 p-4">
+              <span className="font-body text-xs font-semibold tracking-wide text-background/50 uppercase">
+                The case against
+              </span>
+              <p className="font-body mt-1.5 text-sm text-background/80">{result.bearTeaser}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       <GetReportButton result={result} />
     </div>
   );

@@ -82,6 +82,8 @@ The only endpoint the Idea Input Flow calls.
       "matchScore": 86
     }
   ],
+  "bullTeaser": "Grey already validates demand for this exact problem, but none of the current players lean into instant-settlement pricing the way you're describing.",
+  "bearTeaser": "You'd be entering a market with an established, well-funded incumbent already solving this for the same audience.",
   "generatedAt": "2026-08-13T10:15:00.000Z"
 }
 ```
@@ -100,6 +102,8 @@ The only endpoint the Idea Input Flow calls.
 | `matches[].description`             | string                                              | 1–2 sentence snippet, not marketing copy — why it's a match           |
 | `matches[].source`                   | string                                              | e.g. `"Product Hunt"`, `"Crunchbase"`, `"Web Search"`                  |
 | `matches[].matchScore`                | integer, 0–100                                      | Relevance Matcher's score for this specific candidate                 |
+| `bullTeaser`                            | string \| null                                      | Free Verdict Teaser — one-sentence case to proceed, from the same Relevance Matcher call that produced `matches` (no extra search/LLM call); `null` on older verdicts or if the matcher omitted it |
+| `bearTeaser`                            | string \| null                                      | one-sentence case to reconsider, same origin/nullability as `bullTeaser` |
 | `generatedAt`                           | string (ISO 8601)                                   | when the verdict was assembled                                        |
 
 ### Error responses
