@@ -10,10 +10,14 @@ export const maxDuration = 60; // web search + reasoning can take a while
 
 // A separate bucket from "verdict" (not the same one at the same
 // limit) — one logical search can trigger this route at most once, but
-// it shouldn't quietly halve the "verdict" bucket's effective 12/hour
-// budget for people whose searches never need to reach this route at
-// all (cache already sufficient). Bounded independently instead.
-const RATE_LIMIT_REQUESTS = 12;
+// it shouldn't quietly halve the "verdict" bucket's effective budget
+// for people whose searches never need to reach this route at all
+// (cache already sufficient, see CACHE_SUFFICIENT_MATCHES in
+// pipeline.ts). Same 5/hour number as "verdict" for now while the
+// OpenAI budget behind this is small — this route's calls are the
+// expensive ones (real web_search), so worth capping independently
+// rather than trusting "verdict"'s limit to also bound this.
+const RATE_LIMIT_REQUESTS = 5;
 const RATE_LIMIT_WINDOW = "1 h" as const;
 
 function errorResponse(status: number, code: string, message: string) {

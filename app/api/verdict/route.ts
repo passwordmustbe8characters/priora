@@ -9,9 +9,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // reasoning-only re-score can still take a moment
 
 // This is the whole product's public entry point (no auth, no gate) —
-// the limit is sized for a real person trying several related ideas in
-// one sitting, not for scraping it as a bulk research API.
-const RATE_LIMIT_REQUESTS = 12;
+// tightened from 12/hour to 5/hour while the OpenAI budget backing
+// this is genuinely small (a handful of dollars): bounds the worst-
+// case cost any single visitor can run up, at some cost to how many
+// distinct ideas one enthusiastic person can check in a sitting. Raise
+// this back once budget is less of a constraint.
+const RATE_LIMIT_REQUESTS = 5;
 const RATE_LIMIT_WINDOW = "1 h" as const;
 
 function errorResponse(status: number, code: string, message: string, extra?: Record<string, unknown>) {

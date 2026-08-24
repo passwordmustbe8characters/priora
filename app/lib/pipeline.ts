@@ -31,18 +31,22 @@ const MIN_CACHE_CANDIDATES = 3;
 // otherwise still show up as a "match" just for surviving retrieval.
 // This is the actual relevance floor.
 const MIN_CACHED_MATCH_SCORE = 30;
-// The target total the free verdict aims to show. Confirmed live: a
-// category can clear MIN_CACHE_CANDIDATES (>=3 candidates on file,
-// sharing genuinely relevant tags) and still badly under-represent the
-// real market — the DB simply hasn't ingested most of the real players
-// in that category yet (a "food ordering app" search once returned
-// only 2 matches, both from one old bulk-ingestion batch, when the
-// true market has far more). Rather than discarding a partial cache
-// result outright, the cache phase shows whatever it found instantly
-// and the live phase runs alongside it (see runCachePhase/runLivePhase
-// below) purely to backfill the remaining slots up to this number —
-// never to replace what's already confirmed and shown.
+// The target total the free verdict aims to show whenever the live
+// phase actually runs — the absolute cap on matches returned/merged,
+// not the bar for whether live search fires at all (see
+// CACHE_SUFFICIENT_MATCHES below for that).
 const MAX_DISPLAY_MATCHES = 5;
+// The bar for "the cache alone is a good enough answer, skip live
+// search." Deliberately lower than MAX_DISPLAY_MATCHES — cost-tuned:
+// with a very small OpenAI budget backing the public free tool, every
+// live search costs real money (~$0.01+, dominated by the flat
+// web_search tool fee) while a cache-only hit costs a small fraction of
+// a cent. 3 solid matches is treated as a complete-enough answer; only
+// below that does the live phase run to backfill up to
+// MAX_DISPLAY_MATCHES. Raise this back toward MAX_DISPLAY_MATCHES once
+// budget is less of a constraint — the trade-off is real (a category
+// with exactly 3-4 cached matches won't get topped up to 5), not free.
+const CACHE_SUFFICIENT_MATCHES = 3;
 
 // ---------------------------------------------------------------------
 // Stage 1: Idea Normalizer
@@ -454,12 +458,12 @@ export interface CachePhaseResult {
   matches: VerdictMatch[];
   bullTeaser: string | null;
   bearTeaser: string | null;
-  // True whenever matches.length < MAX_DISPLAY_MATCHES — the client's
-  // signal to run the live phase next. When true AND matches is empty,
-  // status/headline/confidence below are inert placeholders (there was
-  // nothing to judge yet), not a real "no match" verdict — the caller
-  // must gate on this flag, not read those fields literally, until the
-  // live phase resolves.
+  // True whenever matches.length < CACHE_SUFFICIENT_MATCHES — the
+  // client's signal to run the live phase next. When true AND matches
+  // is empty, status/headline/confidence below are inert placeholders
+  // (there was nothing to judge yet), not a real "no match" verdict —
+  // the caller must gate on this flag, not read those fields literally,
+  // until the live phase resolves.
   needsLiveSearch: boolean;
 }
 
@@ -491,7 +495,7 @@ export async function runCachePhase(rawIdea: string): Promise<CachePhaseResult> 
     matches: cacheResult.matches,
     bullTeaser: cacheResult.bullTeaser,
     bearTeaser: cacheResult.bearTeaser,
-    needsLiveSearch: cacheResult.matches.length < MAX_DISPLAY_MATCHES,
+    needsLiveSearch: cacheResult.matches.length < CACHE_SUFFICIENT_MATCHES,
   };
 }
 
