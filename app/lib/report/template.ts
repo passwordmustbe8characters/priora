@@ -118,9 +118,17 @@ const TEMPLATE_CSS = `
 // own doc comment in types.ts for why guessing from a string would be
 // exactly the kind of ungrounded inference this report avoids
 // elsewhere. Null renders no badge at all rather than an "Unknown" one.
+//
+// "Western" (the enum value's own name, kept as-is — it's shared with
+// Phase 1's LiveMatch.region and used elsewhere) reads as vague and a
+// little geopolitically loaded as a label a founder actually sees on
+// their report — confirmed confusing in practice. "US/Europe-focused"
+// says the same thing in plain, concrete terms; "Global" alone was
+// otherwise doing double duty as both "not US/Europe" and "not
+// Africa," which is exactly the ambiguity a reader tripped over.
 function regionBadgeLabel(region: CompetitorProfile["region"]): string | null {
   if (region === "african") return "Africa-focused";
-  if (region === "western") return "Western";
+  if (region === "western") return "US/Europe-focused";
   if (region === "global") return "Global";
   return null;
 }
