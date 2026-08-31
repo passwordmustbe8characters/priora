@@ -52,11 +52,21 @@ export default function Home() {
   };
 
   // The fixed header sits above everything, including the results panel
-  // (bg-foreground) once it's open — Wordmark has no color of its own,
-  // it inherits, so without this it'd render foreground-on-foreground
-  // and disappear the instant the panel slides in. Match whichever
-  // surface is actually behind it.
+  // (bg-foreground) once it's open — the text-color classes below have
+  // no color of their own, they inherit, so without this text content
+  // would render foreground-on-foreground and disappear the instant
+  // the panel slides in. Match whichever surface is actually behind it.
   const headerOnInvertedSurface = searchExpanded || panelOpen;
+  // Wordmark renders a real logo image now, not text — an image can't
+  // inherit color the way text-foreground/text-background above does,
+  // so it needs this decided explicitly. Not just "is the theme dark":
+  // the header's actual background is the page's own background when
+  // not inverted, but the PANEL's background (bg-foreground, i.e. the
+  // theme's foreground color) once inverted — so inverted flips which
+  // token is "behind" the header, which flips the answer relative to
+  // theme alone. See Wordmark.tsx's own doc comment for the full truth
+  // table this resolves.
+  const surfaceIsDark = headerOnInvertedSurface ? theme === "light" : theme === "dark";
 
   return (
     <div
@@ -78,7 +88,7 @@ export default function Home() {
           headerOnInvertedSurface ? "text-background" : "text-foreground"
         }`}
       >
-        <Wordmark />
+        <Wordmark surfaceIsDark={surfaceIsDark} />
         <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "light" ? "dark" : "light")} />
       </header>
 
