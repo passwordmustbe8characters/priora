@@ -88,6 +88,49 @@ export async function getAnalyticsSummary(days = 30): Promise<AnalyticsSummary> 
   };
 }
 
+export interface CategoryVerdictRate {
+  tag: string;
+  total: number;
+  existsCount: number;
+  existsRate: number; // 0-1
+}
+
+// Below this sample size, an "exists rate" is more noise than signal —
+// one search landing on "exists" makes a tag look like a 100% rate,
+// which isn't a real pattern worth putting in front of an audience.
+// Excluded from the ranking entirely rather than shown with a caveat,
+// since the whole point of this query is "safe to quote in a post."
+const MIN_SAMPLE_FOR_RATE = 3;
+
+/** Per-category "already exists" rate — e.g. "ideas in fintech came
+ * back 'exists' 80% of the time, vs. 20% for agritech." Distinct from
+ * topTags (which only ranks search VOLUME per category, not outcome)
+ * — this is the query behind the "which category had the highest/
+ * lowest exists rate" half of the marketing-post data pull. */
+export async function getCategoryVerdictRates(days = 30): Promise<CategoryVerdictRate[]> {
+  const db = getDb();
+  const cutoff = periodCutoff(days);
+
+  const rows = (await db.execute(sql`
+    select
+      tag,
+      count(*)::int as total,
+      count(*) filter (where verdict_status = 'exists')::int as exists_count
+    from verdict_events, unnest(category_tags) as tag
+    where created_at > ${cutoff.toISOString()}
+    group by tag
+    having count(*) >= ${MIN_SAMPLE_FOR_RATE}
+    order by total desc
+  `)) as unknown as { tag: string; total: number; exists_count: number }[];
+
+  return rows.map((r) => ({
+    tag: r.tag,
+    total: r.total,
+    existsCount: r.exists_count,
+    existsRate: r.total > 0 ? r.exists_count / r.total : 0,
+  }));
+}
+
 export interface ReportJobsSummary {
   total: number;
   statusBreakdown: { status: string; count: number }[];

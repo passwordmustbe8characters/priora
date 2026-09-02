@@ -1,5 +1,10 @@
 import { LogoutButton } from "../../components/admin/LogoutButton";
-import { getAnalyticsSummary, getPricingFeedbackSummary, getReportJobsSummary } from "../../lib/db/analytics";
+import {
+  getAnalyticsSummary,
+  getCategoryVerdictRates,
+  getPricingFeedbackSummary,
+  getReportJobsSummary,
+} from "../../lib/db/analytics";
 
 /**
  * Phase 2 — Usage Analytics Dashboard (see docs/analytics.md). Gated by
@@ -27,6 +32,11 @@ const STATUS = { good: "#0ca30c", warning: "#fab219", critical: "#d03b3b" };
 const GRID = "#e8e6df";
 
 const PERIODS = [7, 30, 90] as const;
+
+// Must match MIN_SAMPLE_FOR_RATE in lib/db/analytics.ts — the query
+// already excludes low-sample tags server-side, this is only for the
+// caption text explaining why some searched categories don't appear here.
+const MIN_SAMPLE_FOR_RATE_DISPLAY = 3;
 
 const CACHE_LABELS: Record<string, string> = {
   HIT: "In-memory cache",
@@ -147,6 +157,51 @@ function BarList({
   );
 }
 
+/** Same visual language as BarList, but the bar encodes a rate (0-1)
+ * against a fixed 100% scale rather than each row's count against the
+ * row list's own max — a category's exists-rate bar should read the
+ * same length regardless of what else is in the list. */
+function RateList({
+  title,
+  rows,
+  color,
+}: {
+  title: string;
+  rows: { tag: string; total: number; existsRate: number }[];
+  color: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-ink/10 bg-surface p-5">
+      <h2 className="font-body text-sm font-semibold text-ink">{title}</h2>
+      <p className="font-body mt-1 text-xs text-ink-soft">
+        Categories with at least {MIN_SAMPLE_FOR_RATE_DISPLAY} searches this period, ranked highest to lowest.
+      </p>
+      {rows.length === 0 ? (
+        <p className="font-body mt-3 text-sm text-ink-soft">Not enough volume in any single category yet.</p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-3">
+          {rows.map((row) => (
+            <li key={row.tag}>
+              <div className="mb-1 flex items-baseline justify-between gap-3">
+                <span className="font-body truncate text-sm text-ink">{row.tag}</span>
+                <span className="font-body shrink-0 text-xs text-ink-soft">
+                  {Math.round(row.existsRate * 100)}% · {row.total} searches
+                </span>
+              </div>
+              <div className="h-2.5 w-full rounded-full" style={{ backgroundColor: GRID }}>
+                <div
+                  className="h-2.5 rounded-r-full"
+                  style={{ width: `${Math.max(Math.round(row.existsRate * 100), 3)}%`, backgroundColor: color }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function TrendChart({ daily, periodDays }: { daily: { date: string; count: number }[]; periodDays: number }) {
   const width = 640;
   const height = 160;
@@ -208,6 +263,80 @@ function TrendChart({ daily, periodDays }: { daily: { date: string; count: numbe
   );
 }
 
+/**
+ * Pre-filled copy for the social-post template ("This [week/month],
+ * the most-checked category was ___ — followed by ___ and ___" / "Also
+ * noticed: ideas in ___ had the [highest/lowest] 'already exists'
+ * rate") — reads the exact numbers off the queries above rather than
+ * making the founder eyeball the charts and do the ranking/percentage
+ * math by hand before every post. `periodDays` picks the [week/month]
+ * wording automatically off whichever filter is active.
+ */
+function PostDataCallout({
+  periodDays,
+  topTags,
+  categoryRates,
+}: {
+  periodDays: number;
+  topTags: { tag: string; count: number }[];
+  categoryRates: { tag: string; total: number; existsRate: number }[];
+}) {
+  const periodWord = periodDays <= 7 ? "week" : periodDays <= 30 ? "month" : `${periodDays} days`;
+  const [top1, top2, top3] = topTags;
+
+  const sorted = [...categoryRates].sort((a, b) => b.existsRate - a.existsRate);
+  const highest = sorted[0];
+  const lowest = sorted[sorted.length - 1];
+  // Same tag can't usefully be both ends of "highest vs lowest" when
+  // there's only one tag with enough samples — that's not a contrast
+  // worth posting, so treat it the same as "not enough data."
+  const hasRateContrast = sorted.length >= 2 && highest.tag !== lowest.tag;
+
+  return (
+    <div className="mt-8 rounded-2xl border border-ink/15 bg-ink/[0.03] p-5">
+      <h2 className="font-body text-sm font-semibold text-ink">Ready for your post — {periodWord}</h2>
+      <p className="font-body mt-1 text-xs text-ink-soft">
+        Real numbers from this period, in the shape of your IG/Threads template. Copy directly, or use as a sanity
+        check on the fill-in-the-blank version.
+      </p>
+
+      <div className="mt-4 flex flex-col gap-3">
+        <div className="rounded-xl bg-surface p-4">
+          {top1 ? (
+            <p className="font-body text-sm text-ink">
+              This {periodWord}, the most-checked category on Priora was <strong>{top1.tag}</strong> ({top1.count}
+              {top1.count === 1 ? " check" : " checks"})
+              {top2 && (
+                <>
+                  {" "}
+                  — followed by <strong>{top2.tag}</strong> ({top2.count}){top3 && <> and <strong>{top3.tag}</strong> ({top3.count})</>}.
+                </>
+              )}
+            </p>
+          ) : (
+            <p className="font-body text-sm text-ink-soft">Not enough searches yet this {periodWord} to name a top category.</p>
+          )}
+        </div>
+
+        <div className="rounded-xl bg-surface p-4">
+          {hasRateContrast ? (
+            <p className="font-body text-sm text-ink">
+              Ideas in <strong>{highest.tag}</strong> had the highest &quot;already exists&quot; rate of anything
+              checked ({Math.round(highest.existsRate * 100)}% across {highest.total} searches) — <strong>{lowest.tag}</strong>{" "}
+              had the lowest ({Math.round(lowest.existsRate * 100)}% across {lowest.total} searches).
+            </p>
+          ) : (
+            <p className="font-body text-sm text-ink-soft">
+              Not enough categories with {`>=3`} searches yet this {periodWord} for a meaningful highest/lowest
+              comparison — check back once volume picks up, or widen the period above.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default async function AnalyticsPage({
   searchParams,
 }: {
@@ -217,8 +346,9 @@ export default async function AnalyticsPage({
   const requested = Number(params.days);
   const days = (PERIODS as readonly number[]).includes(requested) ? requested : 30;
 
-  const [summary, reportJobs, pricingFeedback] = await Promise.all([
+  const [summary, categoryRates, reportJobs, pricingFeedback] = await Promise.all([
     getAnalyticsSummary(days),
+    getCategoryVerdictRates(days),
     getReportJobsSummary(days),
     getPricingFeedbackSummary(days),
   ]);
@@ -260,6 +390,8 @@ export default async function AnalyticsPage({
             <LogoutButton />
           </div>
         </div>
+
+        <PostDataCallout periodDays={days} topTags={summary.topTags} categoryRates={categoryRates} />
 
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatTile label="Total searches" value={formatCompact(summary.totalSearches)} />
@@ -306,11 +438,16 @@ export default async function AnalyticsPage({
           />
         </div>
 
-        <div className="mt-4">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <BarList
             title="Top category tags searched"
             rows={summary.topTags.map((t) => ({ key: t.tag, count: t.count }))}
             color={CATEGORICAL.aqua}
+          />
+          <RateList
+            title={`"Already exists" rate by category`}
+            rows={[...categoryRates].sort((a, b) => b.existsRate - a.existsRate)}
+            color={CATEGORICAL.orange}
           />
         </div>
 
