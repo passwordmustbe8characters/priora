@@ -81,6 +81,8 @@ export async function POST(request: NextRequest) {
       // Not available on a Phase 1 in-memory cache hit — the categories
       // were already recorded once, on this same idea's original request.
       categoryTags: [],
+      confidence: cached.verdict.confidence,
+      matchCount: cached.matches.length,
     });
     // Fresh requestId per request for logging/support purposes even
     // though the underlying analysis is reused; generatedAt stays as the
@@ -112,6 +114,8 @@ export async function POST(request: NextRequest) {
         cacheStatus: "COMPANY-DB-HIT",
         verdictStatus: response.verdict.status,
         categoryTags: phase.categoryTags,
+        confidence: response.verdict.confidence,
+        matchCount: response.matches.length,
       });
       return Response.json(response, { headers: { "X-Cache": "COMPANY-DB-HIT" } });
     }

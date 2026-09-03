@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Phase 2 — Company Database Schema (see docs/db-schema.md).
@@ -132,6 +132,31 @@ export const verdictEvents = pgTable(
     // free-to-verdict conversion funnel: did a submitted idea actually
     // make it to a verdict, or fall out somewhere first.
     outcome: text("outcome").notNull(),
+
+    // Individual-search detail, added later than the columns above —
+    // only present on `success` outcomes going forward; every row
+    // written before this shipped, and any validation_error/
+    // pipeline_error row, has these null. Exists so the admin dashboard
+    // can show real example searches for the "recent searches" feature
+    // — see getRecentSearches() — WITHOUT storing anything that
+    // narrates what the founder actually typed. Two earlier versions of
+    // this migration stored first the raw idea text, then the verdict
+    // headline as a supposedly-safer substitute; both were reverted
+    // before ever shipping (caught in review, neither ever applied to
+    // production, no real data collected under either). The headline
+    // turned out not to be meaningfully safer — spot-checked a real one
+    // ("children... delivers a new physical book each month") and it
+    // reconstructs the idea almost verbatim, just in different words. A
+    // founder typing an idea into a "does this exist" checker hasn't
+    // consented to it being retained for marketing purposes, even just
+    // for internal browsing, so the bar here is genuine metadata only —
+    // nothing that narrates the idea's content. confidence/matchCount
+    // (numbers) plus categoryTags/verdictStatus above (already-existing
+    // classification, not prose) is the actual line: enough to write "a
+    // fintech idea came back 100% confident it exists" without ever
+    // touching what anyone actually typed or a paraphrase of it.
+    confidence: real("confidence"),
+    matchCount: integer("match_count"),
   },
   (table) => [
     index("verdict_events_created_at_idx").on(table.createdAt),

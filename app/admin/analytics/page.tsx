@@ -2,8 +2,11 @@ import { LogoutButton } from "../../components/admin/LogoutButton";
 import {
   getAnalyticsSummary,
   getCategoryVerdictRates,
+  getPreviousPeriodStats,
   getPricingFeedbackSummary,
+  getRecentSearches,
   getReportJobsSummary,
+  type RecentSearch,
 } from "../../lib/db/analytics";
 
 /**
@@ -98,11 +101,58 @@ function StatusIcon({ kind, color }: { kind: "check" | "warn" | "x"; color: stri
   );
 }
 
-function StatTile({ label, value }: { label: string; value: string }) {
+/**
+ * dataviz skill's stat-tile "delta" contract: signed, vs a named
+ * period, color = direction × whether up is good. All three metrics
+ * this page uses it for (searches, conversion, cache hit rate) are
+ * "up is good" — no `higherIsBetter: false` case exists here yet, but
+ * the prop is real (not hardcoded) since that won't stay true forever
+ * (an error rate, say, would flip it).
+ */
+function DeltaBadge({ current, previous, higherIsBetter = true }: { current: number; previous: number; higherIsBetter?: boolean }) {
+  // No baseline to compare against — omit the badge entirely rather
+  // than show a misleading "+∞%" or divide-by-zero artifact.
+  if (previous <= 0) return null;
+  const pct = ((current - previous) / previous) * 100;
+  if (Math.abs(pct) < 0.5) return null; // flat — not worth a badge
+  const isUp = pct > 0;
+  const isGood = higherIsBetter ? isUp : !isUp;
+  const color = isGood ? STATUS.good : STATUS.critical;
+  return (
+    <span
+      className="font-body inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+      style={{ backgroundColor: `${color}1a`, color }}
+    >
+      <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" aria-hidden>
+        <path
+          d={isUp ? "M12 19V5M6 11l6-6 6 6" : "M12 5v14M6 13l6 6 6-6"}
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      {Math.abs(Math.round(pct))}%
+    </span>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  delta,
+}: {
+  label: string;
+  value: string;
+  delta?: { current: number; previous: number; higherIsBetter?: boolean };
+}) {
   return (
     <div className="rounded-2xl border border-ink/10 bg-surface p-5">
-      <p className="font-body text-sm text-ink-soft">{label}</p>
-      <p className="font-body mt-1 text-4xl font-semibold text-ink">{value}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-body text-sm text-ink-soft">{label}</p>
+        {delta && <DeltaBadge {...delta} />}
+      </div>
+      <p className="font-body mt-1 text-4xl font-semibold text-ink tabular-nums">{value}</p>
     </div>
   );
 }
@@ -127,15 +177,21 @@ function BarList({
       {rows.length === 0 ? (
         <p className="font-body mt-3 text-sm text-ink-soft">No data in this period.</p>
       ) : (
-        <ul className="mt-4 flex flex-col gap-3">
-          {rows.map((row) => {
+        <ul className="mt-4 flex flex-col gap-2.5">
+          {rows.map((row, i) => {
             const pct = total > 0 ? Math.round((row.count / total) * 100) : 0;
             const widthPct = Math.round((row.count / max) * 100);
             return (
-              <li key={row.key}>
+              <li
+                key={row.key}
+                className="-mx-2 rounded-lg px-2 py-1 transition-colors hover:bg-ink/[0.03]"
+              >
                 <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <span className="font-body truncate text-sm text-ink">{labelMap?.[row.key] ?? row.key}</span>
-                  <span className="font-body shrink-0 text-xs text-ink-soft" title={`${row.count} of ${total}`}>
+                  <span className="font-body flex items-center gap-2 truncate text-sm text-ink">
+                    <span className="font-body w-4 shrink-0 text-right text-xs tabular-nums text-ink-soft/70">{i + 1}</span>
+                    {labelMap?.[row.key] ?? row.key}
+                  </span>
+                  <span className="font-body shrink-0 text-xs tabular-nums text-ink-soft" title={`${row.count} of ${total}`}>
                     {row.count} · {pct}%
                   </span>
                 </div>
@@ -144,7 +200,7 @@ function BarList({
                     from) — rounded-r only, not rounded-l. */}
                 <div className="h-2.5 w-full rounded-full" style={{ backgroundColor: GRID }}>
                   <div
-                    className="h-2.5 rounded-r-full"
+                    className="h-2.5 rounded-r-full transition-[width]"
                     style={{ width: `${Math.max(widthPct, 3)}%`, backgroundColor: color }}
                   />
                 </div>
@@ -179,21 +235,101 @@ function RateList({
       {rows.length === 0 ? (
         <p className="font-body mt-3 text-sm text-ink-soft">Not enough volume in any single category yet.</p>
       ) : (
-        <ul className="mt-4 flex flex-col gap-3">
-          {rows.map((row) => (
-            <li key={row.tag}>
+        <ul className="mt-4 flex flex-col gap-2.5">
+          {rows.map((row, i) => (
+            <li key={row.tag} className="-mx-2 rounded-lg px-2 py-1 transition-colors hover:bg-ink/[0.03]">
               <div className="mb-1 flex items-baseline justify-between gap-3">
-                <span className="font-body truncate text-sm text-ink">{row.tag}</span>
-                <span className="font-body shrink-0 text-xs text-ink-soft">
+                <span className="font-body flex items-center gap-2 truncate text-sm text-ink">
+                  <span className="font-body w-4 shrink-0 text-right text-xs tabular-nums text-ink-soft/70">{i + 1}</span>
+                  {row.tag}
+                </span>
+                <span className="font-body shrink-0 text-xs tabular-nums text-ink-soft">
                   {Math.round(row.existsRate * 100)}% · {row.total} searches
                 </span>
               </div>
               <div className="h-2.5 w-full rounded-full" style={{ backgroundColor: GRID }}>
                 <div
-                  className="h-2.5 rounded-r-full"
+                  className="h-2.5 rounded-r-full transition-[width]"
                   style={{ width: `${Math.max(Math.round(row.existsRate * 100), 3)}%`, backgroundColor: color }}
                 />
               </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60_000);
+  if (mins < 60) return `${Math.max(mins, 0)}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function formatCategoryTitle(tags: string[]): string {
+  const shown = tags.slice(0, 3).map((t) => t.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
+  return shown.length > 0 ? `${shown.join(" · ")} idea` : "Uncategorized idea";
+}
+
+/**
+ * Individual real search OUTCOMES, browsable rather than auto-ranked —
+ * "top" for an individual search is inherently a judgment call (unlike
+ * a category's search count), so this hands the founder a scannable
+ * list of real examples and lets them pick the 4-5 that make good post
+ * material, rather than this page guessing.
+ *
+ * Deliberately shows category + outcome only, never anything that
+ * narrates what the founder actually typed — see RecentSearch's own
+ * doc comment in lib/db/analytics.ts for why even the verdict headline
+ * didn't clear that bar. A founder checking an idea here hasn't
+ * consented to it becoming marketing content, so nothing that could
+ * read as "their idea, in different words" belongs in this list.
+ */
+function RecentSearches({ rows }: { rows: RecentSearch[] }) {
+  return (
+    <div className="rounded-2xl border border-ink/10 bg-surface p-5">
+      <h2 className="font-body text-sm font-semibold text-ink">Recent searches</h2>
+      <p className="font-body mt-1 text-xs text-ink-soft">
+        Real search outcomes, by category — enough for a post without ever storing anyone&apos;s actual idea text.
+      </p>
+      {rows.length === 0 ? (
+        <p className="font-body mt-3 text-sm text-ink-soft">
+          No detailed search records yet in this period — this tracking just shipped, so only searches from here
+          forward will show up. Check back after some real usage, or widen the period above.
+        </p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-2">
+          {rows.map((row, i) => (
+            <li key={i} className="rounded-xl border border-ink/10 bg-background/60 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-body text-sm font-medium text-ink">{formatCategoryTitle(row.categoryTags)}</p>
+                <span className="font-body shrink-0 text-xs text-ink-soft/70">{relativeTime(row.createdAt)}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                {row.verdictStatus && (
+                  <span className="font-body rounded-full bg-ink/[0.06] px-2 py-0.5 text-xs font-medium text-ink">
+                    {VERDICT_LABELS[row.verdictStatus] ?? row.verdictStatus}
+                  </span>
+                )}
+                {row.confidence !== null && (
+                  <span className="font-body text-xs tabular-nums text-ink-soft">
+                    {Math.round(row.confidence * 100)}% confidence
+                  </span>
+                )}
+                {row.matchCount !== null && (
+                  <span className="font-body text-xs tabular-nums text-ink-soft">
+                    {row.matchCount} match{row.matchCount === 1 ? "" : "es"}
+                  </span>
+                )}
+              </div>
+              {row.categoryTags.length > 3 && (
+                <p className="font-body mt-2 text-xs text-ink-soft/60">Also: {row.categoryTags.slice(3).join(", ")}</p>
+              )}
             </li>
           ))}
         </ul>
@@ -346,21 +482,23 @@ export default async function AnalyticsPage({
   const requested = Number(params.days);
   const days = (PERIODS as readonly number[]).includes(requested) ? requested : 30;
 
-  const [summary, categoryRates, reportJobs, pricingFeedback] = await Promise.all([
+  const [summary, categoryRates, reportJobs, pricingFeedback, previousPeriod, recentSearches] = await Promise.all([
     getAnalyticsSummary(days),
     getCategoryVerdictRates(days),
     getReportJobsSummary(days),
     getPricingFeedbackSummary(days),
+    getPreviousPeriodStats(days),
+    getRecentSearches(days, 20),
   ]);
 
   const successCount = summary.outcomeBreakdown.find((o) => o.outcome === "success")?.count ?? 0;
-  const successRate = summary.totalSearches > 0 ? Math.round((successCount / summary.totalSearches) * 100) : 0;
+  const successRate = summary.totalSearches > 0 ? successCount / summary.totalSearches : 0;
 
   const cacheHits = summary.cacheBreakdown
     .filter((c) => c.cacheStatus === "HIT" || c.cacheStatus === "COMPANY-DB-HIT")
     .reduce((sum, c) => sum + c.count, 0);
   const cacheEligible = summary.cacheBreakdown.reduce((sum, c) => sum + c.count, 0);
-  const cacheHitRate = cacheEligible > 0 ? Math.round((cacheHits / cacheEligible) * 100) : 0;
+  const cacheHitRate = cacheEligible > 0 ? cacheHits / cacheEligible : 0;
 
   return (
     <main className="min-h-screen bg-background px-6 py-10 sm:px-10 sm:py-14">
@@ -394,9 +532,21 @@ export default async function AnalyticsPage({
         <PostDataCallout periodDays={days} topTags={summary.topTags} categoryRates={categoryRates} />
 
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatTile label="Total searches" value={formatCompact(summary.totalSearches)} />
-          <StatTile label="Free-to-verdict conversion" value={`${successRate}%`} />
-          <StatTile label="Cache hit rate" value={`${cacheHitRate}%`} />
+          <StatTile
+            label="Total searches"
+            value={formatCompact(summary.totalSearches)}
+            delta={{ current: summary.totalSearches, previous: previousPeriod.totalSearches }}
+          />
+          <StatTile
+            label="Free-to-verdict conversion"
+            value={`${Math.round(successRate * 100)}%`}
+            delta={{ current: successRate, previous: previousPeriod.successRate }}
+          />
+          <StatTile
+            label="Cache hit rate"
+            value={`${Math.round(cacheHitRate * 100)}%`}
+            delta={{ current: cacheHitRate, previous: previousPeriod.cacheHitRate }}
+          />
         </div>
 
         <div className="mt-4 rounded-2xl border border-ink/10 bg-surface p-5">
@@ -449,6 +599,10 @@ export default async function AnalyticsPage({
             rows={[...categoryRates].sort((a, b) => b.existsRate - a.existsRate)}
             color={CATEGORICAL.orange}
           />
+        </div>
+
+        <div className="mt-4">
+          <RecentSearches rows={recentSearches} />
         </div>
 
         <h2 className="font-display mt-10 text-xl font-bold text-ink">Deep report funnel</h2>

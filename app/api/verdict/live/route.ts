@@ -99,6 +99,8 @@ export async function POST(request: NextRequest) {
       cacheStatus,
       verdictStatus: result.verdict.status,
       categoryTags,
+      confidence: result.verdict.confidence,
+      matchCount: result.matches.length,
     });
     return Response.json(result, { headers: { "X-Cache": cacheStatus } });
   } catch (err) {

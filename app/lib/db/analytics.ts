@@ -1,4 +1,4 @@
-import { gt, sql } from "drizzle-orm";
+import { and, desc, gt, isNotNull, lte, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { verdictEvents, type NewVerdictEvent } from "./schema";
 
@@ -86,6 +86,91 @@ export async function getAnalyticsSummary(days = 30): Promise<AnalyticsSummary> 
     topTags: tagRows.map((r) => ({ tag: r.tag, count: r.n })),
     dailyCounts: dailyRows.map((r) => ({ date: r.date, count: r.n })),
   };
+}
+
+export interface PeriodStats {
+  totalSearches: number;
+  successRate: number; // 0-1
+  cacheHitRate: number; // 0-1
+}
+
+async function getPeriodStats(from: Date, to: Date | null): Promise<PeriodStats> {
+  const db = getDb();
+  const bounds = to ? and(gt(verdictEvents.createdAt, from), lte(verdictEvents.createdAt, to)) : gt(verdictEvents.createdAt, from);
+
+  const rows = (await db.execute(sql`
+    select
+      count(*)::int as total,
+      count(*) filter (where outcome = 'success')::int as success_count,
+      count(*) filter (where cache_status in ('HIT', 'COMPANY-DB-HIT'))::int as cache_hit_count,
+      count(*) filter (where cache_status is not null)::int as cache_eligible_count
+    from verdict_events
+    where ${bounds}
+  `)) as unknown as { total: number; success_count: number; cache_hit_count: number; cache_eligible_count: number }[];
+
+  const r = rows[0] ?? { total: 0, success_count: 0, cache_hit_count: 0, cache_eligible_count: 0 };
+  return {
+    totalSearches: r.total,
+    successRate: r.total > 0 ? r.success_count / r.total : 0,
+    cacheHitRate: r.cache_eligible_count > 0 ? r.cache_hit_count / r.cache_eligible_count : 0,
+  };
+}
+
+/** Stat-tile deltas (dataviz skill's figure contract: "delta, signed,
+ * vs a named period") — the CURRENT window vs the immediately
+ * preceding window of the same length (e.g. for 30d, the 30 days
+ * before that). Two separate queries, not derivable from
+ * getAnalyticsSummary's single-window numbers. */
+export async function getPreviousPeriodStats(days: number): Promise<PeriodStats> {
+  const now = new Date();
+  const currentStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  const previousStart = new Date(now.getTime() - days * 2 * 24 * 60 * 60 * 1000);
+  return getPeriodStats(previousStart, currentStart);
+}
+
+export interface RecentSearch {
+  verdictStatus: string | null;
+  confidence: number | null;
+  matchCount: number | null;
+  categoryTags: string[];
+  createdAt: string;
+}
+
+/** Individual real searches (not aggregated) — what the top-of-page
+ * category/rate summaries can't give you: a single example outcome
+ * (category, status, confidence, match count) for hand-picking into
+ * social content. Deliberately carries nothing that narrates what the
+ * founder actually typed — see confidence/matchCount's own doc comment
+ * on schema.ts for why even the verdict headline didn't clear that bar
+ * (it reconstructs the idea almost verbatim, just reworded). Only rows
+ * with matchCount set are returned — that field was added after this
+ * table's original aggregate-only design, so anything searched before
+ * this shipped (or any non-success outcome) has nothing to show here
+ * and is correctly excluded rather than shown blank. */
+export async function getRecentSearches(days = 30, limit = 20): Promise<RecentSearch[]> {
+  const db = getDb();
+  const cutoff = periodCutoff(days);
+
+  const rows = await db
+    .select({
+      verdictStatus: verdictEvents.verdictStatus,
+      confidence: verdictEvents.confidence,
+      matchCount: verdictEvents.matchCount,
+      categoryTags: verdictEvents.categoryTags,
+      createdAt: verdictEvents.createdAt,
+    })
+    .from(verdictEvents)
+    .where(and(gt(verdictEvents.createdAt, cutoff), isNotNull(verdictEvents.matchCount)))
+    .orderBy(desc(verdictEvents.createdAt))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    verdictStatus: r.verdictStatus,
+    confidence: r.confidence,
+    matchCount: r.matchCount,
+    categoryTags: r.categoryTags,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 export interface CategoryVerdictRate {
