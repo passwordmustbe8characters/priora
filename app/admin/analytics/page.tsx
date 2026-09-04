@@ -1,6 +1,8 @@
+import { CategoryDrilldownList } from "../../components/admin/CategoryDrilldownList";
 import { LogoutButton } from "../../components/admin/LogoutButton";
 import {
   getAnalyticsSummary,
+  getCategoryCooccurrence,
   getCategoryVerdictRates,
   getPreviousPeriodStats,
   getPricingFeedbackSummary,
@@ -482,14 +484,16 @@ export default async function AnalyticsPage({
   const requested = Number(params.days);
   const days = (PERIODS as readonly number[]).includes(requested) ? requested : 30;
 
-  const [summary, categoryRates, reportJobs, pricingFeedback, previousPeriod, recentSearches] = await Promise.all([
-    getAnalyticsSummary(days),
-    getCategoryVerdictRates(days),
-    getReportJobsSummary(days),
-    getPricingFeedbackSummary(days),
-    getPreviousPeriodStats(days),
-    getRecentSearches(days, 20),
-  ]);
+  const [summary, categoryRates, reportJobs, pricingFeedback, previousPeriod, recentSearches, categoryCooccurrence] =
+    await Promise.all([
+      getAnalyticsSummary(days),
+      getCategoryVerdictRates(days),
+      getReportJobsSummary(days),
+      getPricingFeedbackSummary(days),
+      getPreviousPeriodStats(days),
+      getRecentSearches(days, 20),
+      getCategoryCooccurrence(days),
+    ]);
 
   const successCount = summary.outcomeBreakdown.find((o) => o.outcome === "success")?.count ?? 0;
   const successRate = summary.totalSearches > 0 ? successCount / summary.totalSearches : 0;
@@ -589,10 +593,11 @@ export default async function AnalyticsPage({
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <BarList
+          <CategoryDrilldownList
             title="Top category tags searched"
             rows={summary.topTags.map((t) => ({ key: t.tag, count: t.count }))}
             color={CATEGORICAL.aqua}
+            cooccurrence={categoryCooccurrence}
           />
           <RateList
             title={`"Already exists" rate by category`}

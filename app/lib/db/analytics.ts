@@ -216,6 +216,40 @@ export async function getCategoryVerdictRates(days = 30): Promise<CategoryVerdic
   }));
 }
 
+// How many other tags to show per category when it's clicked open —
+// enough to read as a real niche breakdown, not so many it turns into
+// the full tag list again.
+const MAX_COOCCURRING_TAGS = 6;
+
+/** For each category tag, the OTHER tags that most often showed up
+ * alongside it in the same search — e.g. clicking "b2c" shows
+ * "fintech, marketplace, consumer..." revealing the niches inside that
+ * category. Same privacy stance as everything else added this session:
+ * this is classification co-occurrence (which tags travel together),
+ * never anything that narrates what a founder actually typed. A
+ * self-join over unnest — cheap at this data volume (tens to low
+ * hundreds of rows/period), no reason to reach for anything fancier. */
+export async function getCategoryCooccurrence(days = 30): Promise<Record<string, { tag: string; count: number }[]>> {
+  const db = getDb();
+  const cutoff = periodCutoff(days);
+
+  const rows = (await db.execute(sql`
+    select a.tag as tag, b.tag as co_tag, count(*)::int as n
+    from verdict_events, unnest(category_tags) as a(tag), unnest(category_tags) as b(tag)
+    where a.tag <> b.tag
+      and created_at > ${cutoff.toISOString()}
+    group by a.tag, b.tag
+    order by a.tag, n desc
+  `)) as unknown as { tag: string; co_tag: string; n: number }[];
+
+  const byTag: Record<string, { tag: string; count: number }[]> = {};
+  for (const r of rows) {
+    const list = byTag[r.tag] ?? (byTag[r.tag] = []);
+    if (list.length < MAX_COOCCURRING_TAGS) list.push({ tag: r.co_tag, count: r.n });
+  }
+  return byTag;
+}
+
 export interface ReportJobsSummary {
   total: number;
   statusBreakdown: { status: string; count: number }[];
