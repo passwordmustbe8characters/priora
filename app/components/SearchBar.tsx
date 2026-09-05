@@ -19,12 +19,13 @@ import { VerdictSkeleton } from "./VerdictSkeleton";
  * forces it false on mobile, where the full-screen panel takes over
  * directly instead of this card ever growing (no room for both).
  *
- * Idle/active is a rounded rectangle (not a thin pill) specifically so
- * the region-scope toggle row has somewhere to live INSIDE the same
- * white card as the input, below it, separated by a hairline — rather
- * than as a separate floating element next to the bar. Hidden once
- * `expanded` (no room, and a search is already in flight or done by
- * then).
+ * Idle/active is a taller rounded rectangle (not a thin pill), laid out
+ * like a chat composer: the input fills the top, and a bottom row holds
+ * the region-scope toggle at the left and the submit arrow at the
+ * right, both inside the same white card. That bottom row (and the
+ * whole rectangle shape) disappears once `expanded` (no room, and a
+ * search is already in flight or done by then) — the expanded card
+ * keeps its original single-row header layout untouched.
  */
 export function SearchBar({
   phase,
@@ -103,8 +104,8 @@ export function SearchBar({
       }`}
       style={expanded ? { height: "min(68vh, 560px)" } : undefined}
     >
-      <div className={`flex shrink-0 items-center gap-3 ${expanded ? "p-4 sm:p-5" : ""}`}>
-        {expanded && (
+      {expanded ? (
+        <div className="flex shrink-0 items-center gap-3 p-4 sm:p-5">
           <button
             type="button"
             onClick={onReset}
@@ -121,9 +122,52 @@ export function SearchBar({
               />
             </svg>
           </button>
-        )}
 
-        <div className="relative min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1">
+            <input
+              ref={inputRef}
+              type="text"
+              onFocus={onActivate}
+              readOnly={phase === "loading"}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canSubmit) submit();
+              }}
+              placeholder="Tell us your idea - we'll tell you if it exists already"
+              className="font-body h-12 w-full rounded-full bg-background/10 px-4 pr-14 text-sm text-background outline-none ring-1 ring-background/15 transition-colors duration-300 placeholder:text-background/40 focus:ring-background/30 sm:h-14 sm:px-4 sm:pr-16 sm:text-base"
+            />
+            <button
+              type="button"
+              onClick={submit}
+              aria-label="Check if it exists"
+              disabled={!canSubmit}
+              tabIndex={active ? 0 : -1}
+              className={`absolute top-1/2 right-1.5 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-background text-foreground transition-all duration-300 disabled:opacity-60 sm:right-2 sm:h-10 sm:w-10 ${
+                active ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"
+              }`}
+            >
+              {phase === "loading" ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-foreground/30 border-t-foreground" />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                  <path
+                    d="M5 12h13.5M13 6l6.5 6-6.5 6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : (
+        // Chat-composer layout: the input fills the top on its own line
+        // (taller card, room to breathe), then one bottom row holds the
+        // region toggle at the left and the submit arrow at the right —
+        // no divider between them, just vertical spacing, so it reads as
+        // one continuous card rather than two stacked sections.
+        <div className="flex min-h-26 flex-col justify-between gap-3 p-1 sm:min-h-30 sm:p-1.5">
           <input
             ref={inputRef}
             type="text"
@@ -133,66 +177,60 @@ export function SearchBar({
               if (e.key === "Enter" && canSubmit) submit();
             }}
             placeholder="Tell us your idea - we'll tell you if it exists already"
-            className={`font-body h-12 w-full px-3 pr-12 text-sm outline-none transition-colors duration-300 sm:h-14 sm:px-4 sm:pr-14 sm:text-base ${
-              expanded
-                ? "rounded-full bg-background/10 text-background ring-1 ring-background/15 placeholder:text-background/40 focus:ring-background/30"
-                : // No bg/shadow/ring of its own anymore — the outer card
-                  // above now carries all of that, since it also has to
-                  // visually contain the toggle row below.
-                  "bg-transparent text-black placeholder:text-black/45"
-            }`}
+            className="font-body w-full bg-transparent px-3 pt-2 text-base text-black outline-none placeholder:text-black/45 sm:px-4 sm:pt-2.5 sm:text-lg"
           />
-          <button
-            type="button"
-            onClick={submit}
-            aria-label="Check if it exists"
-            disabled={!canSubmit}
-            tabIndex={active ? 0 : -1}
-            className={`absolute top-1/2 right-1 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full transition-all duration-300 disabled:opacity-60 sm:right-1.5 sm:h-10 sm:w-10 ${
-              expanded ? "bg-background text-foreground" : "bg-black text-white"
-            } ${active ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"}`}
-          >
-            {phase === "loading" ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-foreground/30 border-t-foreground" />
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
-                <path
-                  d="M5 12h13.5M13 6l6.5 6-6.5 6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
 
-      {!expanded && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-black/10 px-1 pt-2">
-          <button
-            type="button"
-            onClick={() => setRegion("africa")}
-            aria-pressed={regionScope === "africa"}
-            title="Scope results to companies serving Africa"
-            className={`font-body cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition sm:text-sm ${
-              regionScope === "africa" ? "bg-black text-white" : "bg-black/5 text-black/70 hover:bg-black/10"
-            }`}
-          >
-            Africa
-          </button>
-          <button
-            type="button"
-            onClick={() => setRegion("western")}
-            aria-pressed={regionScope === "western"}
-            title="Scope results to companies serving the US/Europe"
-            className={`font-body cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition sm:text-sm ${
-              regionScope === "western" ? "bg-black text-white" : "bg-black/5 text-black/70 hover:bg-black/10"
-            }`}
-          >
-            Western
-          </button>
+          <div className="flex items-center justify-between gap-2 px-2 pb-1 sm:px-2.5">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRegion("africa")}
+                aria-pressed={regionScope === "africa"}
+                title="Scope results to companies serving Africa"
+                className={`font-body cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition sm:text-sm ${
+                  regionScope === "africa" ? "bg-black text-white" : "bg-black/5 text-black/70 hover:bg-black/10"
+                }`}
+              >
+                Africa
+              </button>
+              <button
+                type="button"
+                onClick={() => setRegion("western")}
+                aria-pressed={regionScope === "western"}
+                title="Scope results to companies serving the US/Europe"
+                className={`font-body cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition sm:text-sm ${
+                  regionScope === "western" ? "bg-black text-white" : "bg-black/5 text-black/70 hover:bg-black/10"
+                }`}
+              >
+                Western
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={submit}
+              aria-label="Check if it exists"
+              disabled={!canSubmit}
+              tabIndex={active ? 0 : -1}
+              className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-black text-white transition-all duration-300 disabled:opacity-60 sm:h-10 sm:w-10 ${
+                active ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"
+              }`}
+            >
+              {phase === "loading" ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                  <path
+                    d="M5 12h13.5M13 6l6.5 6-6.5 6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
