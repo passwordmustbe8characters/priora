@@ -6,7 +6,7 @@ import { playSwoosh, playTypeTick, primeAudio } from "../lib/sound";
 
 const COPY =
   "Most startup ideas already exist somewhere. Priora tells you which ones — in seconds, with real sources — before you spend months building the wrong thing.";
-const HOLD_MS = 1200; // pause after typing finishes, before swiping up — was 3000;
+const HOLD_MS = 1200; // pause after typing finishes, before swiping up — was 3000
 // real user feedback ("he didn't read the typing animation") meant the
 // old pacing (3s hold, ~70-130ms/char) asked for more patience than
 // people were actually giving it. Shortened to "read the last word or
@@ -23,15 +23,15 @@ function rand(min: number, max: number) {
 /** Deliberately uneven, like someone hunting-and-pecking with one hand
  * rather than a perfectly uniform machine cadence — longer at word and
  * punctuation boundaries, a bit of random jitter on ordinary letters.
- * Tuned so the full COPY string (~160 chars) types in roughly 3-4s
- * instead of the original ~16s — measured end-to-end (overlay mount to
- * unmount, hold + swipe included) at ~5.7s total with HOLD_MS above, vs.
- * ~20s before this pass. See HOLD_MS's comment for why "fast" was the
- * actual goal here, not just a marginal tweak. */
+ * A first pass cut these all the way down (~5.7s full sequence) and that
+ * read as too fast in practice — this is the settled middle ground:
+ * noticeably quicker than the original ~20s sequence, but still an
+ * actual typewriter cadence rather than a blur. Full COPY string types
+ * in ~9-10s with these numbers (~11-12s total with HOLD_MS + swipe). */
 function nextDelay(char: string) {
-  if (char === " ") return rand(35, 55);
-  if (",.—".includes(char)) return rand(55, 85);
-  return rand(18, 32);
+  if (char === " ") return rand(65, 105);
+  if (",.—".includes(char)) return rand(105, 155);
+  return rand(40, 78);
 }
 
 /**
