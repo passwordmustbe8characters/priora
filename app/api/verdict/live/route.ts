@@ -3,7 +3,7 @@ import { runLivePhase } from "../../../lib/pipeline";
 import { setCachedVerdict } from "../../../lib/cache";
 import { recordVerdictEvent } from "../../../lib/db/analytics";
 import { checkRateLimit } from "../../../lib/rateLimit";
-import type { VerdictMatch } from "../../../lib/verdict";
+import type { RegionScope, VerdictMatch } from "../../../lib/verdict";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // web search + reasoning can take a while
@@ -81,18 +81,20 @@ export async function POST(request: NextRequest) {
     ? record.categoryTags.filter((t): t is string => typeof t === "string")
     : [];
   const existingMatches = Array.isArray(record.existingMatches) ? record.existingMatches.filter(isPlausibleMatch) : [];
+  const regionScope: RegionScope =
+    record.regionScope === "africa" || record.regionScope === "western" ? record.regionScope : null;
 
   if (!ideaRaw || !normalizedIdea || categoryTags.length === 0) {
     return errorResponse(400, "VALIDATION_ERROR", "ideaRaw, normalizedIdea, and categoryTags are required.");
   }
 
   try {
-    const result = await runLivePhase({ ideaRaw, normalizedIdea, categoryTags, existingMatches });
+    const result = await runLivePhase({ ideaRaw, normalizedIdea, categoryTags, existingMatches, regionScope });
     // Cached and recorded here, not in /api/verdict — this is the
     // final answer for the search regardless of whether the cache
     // phase found 0 or 4 matches first, so this is the one place a
     // complete, analytics-worthy result for this search actually exists.
-    setCachedVerdict(ideaRaw, result);
+    setCachedVerdict(ideaRaw, result, regionScope);
     const cacheStatus = existingMatches.length > 0 ? "MIXED" : "MISS";
     await recordVerdictEvent({
       outcome: "success",

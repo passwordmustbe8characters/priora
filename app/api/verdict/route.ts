@@ -3,7 +3,7 @@ import { runCachePhase } from "../../lib/pipeline";
 import { getCachedVerdict, setCachedVerdict } from "../../lib/cache";
 import { recordVerdictEvent } from "../../lib/db/analytics";
 import { checkRateLimit } from "../../lib/rateLimit";
-import type { VerdictResponse } from "../../lib/verdict";
+import type { RegionScope, VerdictResponse } from "../../lib/verdict";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // reasoning-only re-score can still take a moment
@@ -56,10 +56,10 @@ export async function POST(request: NextRequest) {
     return errorResponse(400, "INVALID_IDEA", "Request body must be valid JSON.");
   }
 
-  const idea =
-    typeof body === "object" && body !== null && "idea" in body
-      ? String((body as { idea: unknown }).idea ?? "").trim()
-      : "";
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const idea = typeof record.idea === "string" ? record.idea.trim() : "";
+  const regionScope: RegionScope =
+    record.regionScope === "africa" || record.regionScope === "western" ? record.regionScope : null;
 
   if (idea.length < 10 || idea.length > 2000) {
     // Awaited, not fire-and-forget — same reasoning as the company
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     return errorResponse(400, "INVALID_IDEA", "Tell us a bit more — ideas need to be at least 10 characters.");
   }
 
-  const cached = getCachedVerdict(idea);
+  const cached = getCachedVerdict(idea, regionScope);
   if (cached) {
     await recordVerdictEvent({
       outcome: "success",
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const phase = await runCachePhase(idea);
+    const phase = await runCachePhase(idea, regionScope);
     const response: VerdictResponse = {
       requestId: phase.requestId,
       idea: phase.idea,
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
     if (!phase.needsLiveSearch) {
       // The cache alone already reached the full match cap — a
       // complete answer, exactly like the old single-phase flow.
-      setCachedVerdict(idea, response);
+      setCachedVerdict(idea, response, regionScope);
       await recordVerdictEvent({
         outcome: "success",
         cacheStatus: "COMPANY-DB-HIT",

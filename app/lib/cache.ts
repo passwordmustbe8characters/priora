@@ -1,4 +1,4 @@
-import type { VerdictResponse } from "./verdict";
+import type { RegionScope, VerdictResponse } from "./verdict";
 
 /**
  * In-memory, TTL-based cache for verdicts. Every web_search call costs a
@@ -20,16 +20,23 @@ const store = new Map<string, CacheEntry>();
 
 const TTL_MS = (Number(process.env.CACHE_TTL_SECONDS) || 3600) * 1000;
 
-function normalizeKey(idea: string): string {
-  return idea
+// regionScope is part of the key, not just the idea text — the same
+// idea scoped to "africa" and scoped to "western" (or unscoped) can
+// legitimately return different matches/verdicts, so collapsing them to
+// one cache entry would silently serve a founder the wrong scope's
+// answer the second time they search the same idea text with a
+// different toggle selected.
+function normalizeKey(idea: string, regionScope: RegionScope): string {
+  const ideaKey = idea
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/[.!?]+$/, "");
+  return `${regionScope ?? "all"}:${ideaKey}`;
 }
 
-export function getCachedVerdict(idea: string): VerdictResponse | null {
-  const key = normalizeKey(idea);
+export function getCachedVerdict(idea: string, regionScope: RegionScope = null): VerdictResponse | null {
+  const key = normalizeKey(idea, regionScope);
   const entry = store.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
@@ -39,6 +46,6 @@ export function getCachedVerdict(idea: string): VerdictResponse | null {
   return entry.data;
 }
 
-export function setCachedVerdict(idea: string, data: VerdictResponse): void {
-  store.set(normalizeKey(idea), { data, expiresAt: Date.now() + TTL_MS });
+export function setCachedVerdict(idea: string, data: VerdictResponse, regionScope: RegionScope = null): void {
+  store.set(normalizeKey(idea, regionScope), { data, expiresAt: Date.now() + TTL_MS });
 }

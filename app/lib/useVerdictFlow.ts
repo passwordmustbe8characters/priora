@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { submitIdea, submitIdeaLive, VerdictError, type VerdictResponse } from "./verdict";
+import { submitIdea, submitIdeaLive, VerdictError, type RegionScope, type VerdictResponse } from "./verdict";
 
 export type Phase = "idle" | "active" | "loading" | "result" | "error";
 
@@ -31,6 +31,12 @@ export function useVerdictFlow() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastIdea, setLastIdea] = useState("");
+  // The search bar's Africa/Western toggle. Deliberately NOT reset by
+  // `reset()` below — it's a standing preference like the theme toggle,
+  // not part of one search's transient state, so starting a new search
+  // keeps whatever scope was last selected instead of silently widening
+  // back out to "all round".
+  const [regionScope, setRegionScope] = useState<RegionScope>(null);
   const generationRef = useRef(0);
 
   const activate = () => {
@@ -68,8 +74,14 @@ export function useVerdictFlow() {
     // moved past (a fresh submit, or a reset).
     const generation = ++generationRef.current;
 
+    // Captured once per submit, not read live off state mid-flight — a
+    // search should stay scoped to whatever was selected the moment it
+    // was submitted, even if the founder flips the toggle again while
+    // this request is still in progress.
+    const scope = regionScope;
+
     try {
-      const data = await submitIdea(idea);
+      const data = await submitIdea(idea, scope);
       if (generation !== generationRef.current) return;
       setResult(data);
       setPhase("result");
@@ -82,6 +94,7 @@ export function useVerdictFlow() {
             normalizedIdea: data.idea.normalized,
             categoryTags: data.categoryTags ?? [],
             existingMatches: data.matches,
+            regionScope: scope,
           });
           if (generation !== generationRef.current) return;
           setResult(finalData);
@@ -111,5 +124,18 @@ export function useVerdictFlow() {
     setPhase("idle");
   };
 
-  return { phase, result, loadingMore, errorMessage, lastIdea, activate, cancel, submit, reset, clearErrorOnEdit };
+  return {
+    phase,
+    result,
+    loadingMore,
+    errorMessage,
+    lastIdea,
+    regionScope,
+    setRegionScope,
+    activate,
+    cancel,
+    submit,
+    reset,
+    clearErrorOnEdit,
+  };
 }

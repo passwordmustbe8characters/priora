@@ -4,6 +4,18 @@
 
 export type VerdictStatus = "exists" | "partial_overlap" | "no_clear_match";
 
+/** The search-bar region toggle's value. `null` means "all round" — no
+ * scope, the original unscoped search (this is also the default/neither-
+ * selected state). "africa"/"western" narrow both the cache lookup and
+ * the live search to that market, but still allow "global" (available
+ * everywhere) competitors through — see findFreshCandidates and
+ * liveSearchAndMatch in pipeline.ts for exactly how each phase applies
+ * this. Deliberately just two buckets matching what the UI actually
+ * offers, not the three-way "western" | "african" | "global" enum a
+ * matched company itself carries (see companies.region in db/schema.ts)
+ * — a founder scopes to a market, they don't scope to "global". */
+export type RegionScope = "africa" | "western" | null;
+
 /** The match-list cap everywhere in the UI — kept here (not just in
  * pipeline.ts, which is server-only) so client components can size
  * their "still loading more" skeleton placeholders without importing
@@ -56,13 +68,13 @@ export class VerdictError extends Error {
   }
 }
 
-export async function submitIdea(idea: string): Promise<VerdictResponse> {
+export async function submitIdea(idea: string, regionScope: RegionScope = null): Promise<VerdictResponse> {
   let res: Response;
   try {
     res = await fetch("/api/verdict", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea }),
+      body: JSON.stringify({ idea, regionScope }),
     });
   } catch {
     throw new VerdictError("NETWORK_ERROR", "Couldn't reach the server. Check your connection and try again.");
@@ -96,6 +108,7 @@ export async function submitIdeaLive(params: {
   normalizedIdea: string;
   categoryTags: string[];
   existingMatches: VerdictMatch[];
+  regionScope?: RegionScope;
 }): Promise<VerdictResponse> {
   let res: Response;
   try {

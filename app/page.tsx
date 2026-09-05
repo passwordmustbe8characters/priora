@@ -105,6 +105,8 @@ export default function Home() {
           errorMessage={flow.errorMessage}
           lastIdea={flow.lastIdea}
           expanded={searchExpanded}
+          regionScope={flow.regionScope}
+          onRegionScopeChange={flow.setRegionScope}
           onActivate={flow.activate}
           onCancel={flow.cancel}
           onSubmit={flow.submit}

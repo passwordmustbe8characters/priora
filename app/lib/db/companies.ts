@@ -56,8 +56,20 @@ const GENERIC_TAGS = new Set(["b2b", "b2c", "b2b2c", "enterprise", "smb", "consu
  * One freshness clock per row (last_updated_at), not per column — see
  * docs/db-schema.md for why field-level staleness tracking is overkill
  * for this stage.
+ *
+ * `regionScope` is the search bar's Africa/Western toggle (null = "all
+ * round", no filter). It only ever EXCLUDES the opposing region —
+ * "global" rows (available/relevant everywhere) always stay eligible
+ * regardless of scope, since a globally-available product is a real
+ * competitor no matter which market the founder said they care about;
+ * only a competitor confirmed to serve just the OTHER region is
+ * genuinely irrelevant to this search.
  */
-export async function findFreshCandidates(categoryTags: string[], limit = 10): Promise<Company[]> {
+export async function findFreshCandidates(
+  categoryTags: string[],
+  limit = 10,
+  regionScope: "africa" | "western" | null = null,
+): Promise<Company[]> {
   if (categoryTags.length < MIN_SHARED_TAGS) return [];
   const db = getDb();
   const tagsLiteral = toPgTextArrayLiteral(categoryTags);
@@ -67,6 +79,7 @@ export async function findFreshCandidates(categoryTags: string[], limit = 10): P
   // matches, so that just falls through to live search rather than
   // guessing, which is the right failure mode here.
   const nonGenericTagsLiteral = toPgTextArrayLiteral(nonGenericTags);
+  const excludedRegion = regionScope === "africa" ? "western" : regionScope === "western" ? "african" : null;
   return db
     .select()
     .from(companies)
@@ -81,6 +94,7 @@ export async function findFreshCandidates(categoryTags: string[], limit = 10): P
           WHERE tag = ANY(${nonGenericTagsLiteral}::text[])
         ) >= 1`,
         gt(companies.lastUpdatedAt, ttlCutoff()),
+        excludedRegion ? sql`${companies.region} != ${excludedRegion}` : undefined,
       ),
     )
     .limit(limit);

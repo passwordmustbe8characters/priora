@@ -2,7 +2,7 @@ import { getOpenAI, VERDICT_MODEL } from "./openai";
 import { findFreshCandidates, upsertCompanies, type UpsertResult } from "./db/companies";
 import type { Company } from "./db/schema";
 import { CATEGORY_TAXONOMY } from "./taxonomy";
-import type { VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
+import type { RegionScope, VerdictMatch, VerdictResponse, VerdictStatus } from "./verdict";
 
 /**
  * Real Phase 1+2 backend pipeline (see docs/api-contract.md for the
@@ -175,9 +175,21 @@ interface CachedMatchOutput {
   bearTeaser: string;
 }
 
+// Doesn't change the judgment logic — candidates are already scope-
+// filtered by findFreshCandidates before this runs — but naming the
+// scope in the prompt gets a more honestly-worded headline/teaser out
+// of the model (e.g. "no close match in the African market" instead of
+// a generic sentence that reads as if the whole world was searched).
+function scopeNote(regionScope: RegionScope): string {
+  if (regionScope === "africa") return " (The founder only cares about the African market.)";
+  if (regionScope === "western") return " (The founder only cares about the Western/US-Europe market.)";
+  return "";
+}
+
 async function cachedMatch(
   normalizedIdea: string,
   candidates: Company[],
+  regionScope: RegionScope = null,
 ): Promise<{
   status: VerdictStatus;
   headline: string;
@@ -196,7 +208,7 @@ async function cachedMatch(
     reasoning: { effort: "low" },
     input: [
       { role: "system", content: CACHED_MATCH_SYSTEM_PROMPT },
-      { role: "user", content: `Idea: ${normalizedIdea}\n\nCandidates:\n${candidateList}` },
+      { role: "user", content: `Idea: ${normalizedIdea}${scopeNote(regionScope)}\n\nCandidates:\n${candidateList}` },
     ],
     text: {
       format: { type: "json_schema", name: "cached_match", schema: CACHED_MATCH_SCHEMA, strict: true },
@@ -354,10 +366,25 @@ function mergeMatches(existing: VerdictMatch[], found: VerdictMatch[]): VerdictM
   return [...byName.values()].sort((a, b) => b.matchScore - a.matchScore).slice(0, MAX_DISPLAY_MATCHES);
 }
 
+// Appended to LIVE_SEARCH_SYSTEM_PROMPT, not baked into the constant
+// itself — most searches run unscoped ("all round"), so the base prompt
+// stays the honest default and this only tacks on a restriction when the
+// founder actually asked for one via the search bar's region toggle.
+function scopeClause(regionScope: RegionScope): string {
+  if (regionScope === "africa") {
+    return "\n\nSearch scope: the founder only cares about the African market. Only search for and include competitors based in or primarily serving Africa — ignore ones that only serve Western/other markets with no real African presence. If genuinely nothing turns up for Africa specifically, say so honestly (a low-match/no_clear_match verdict) rather than reporting an unrelated non-African competitor just to have a match.";
+  }
+  if (regionScope === "western") {
+    return "\n\nSearch scope: the founder only cares about the Western (US/Europe) market. Only search for and include competitors based in or primarily serving the US/Europe — ignore ones that only serve African/other regional markets with no real Western presence. If genuinely nothing turns up for the Western market specifically, say so honestly (a low-match/no_clear_match verdict) rather than reporting an unrelated non-Western competitor just to have a match.";
+  }
+  return "";
+}
+
 async function liveSearchAndMatch(
   normalizedIdea: string,
   categoryTags: string[],
   existingMatches: VerdictMatch[] = [],
+  regionScope: RegionScope = null,
 ): Promise<{
   status: VerdictStatus;
   headline: string;
@@ -389,7 +416,7 @@ async function liveSearchAndMatch(
     tools: [{ type: "web_search", search_context_size: "medium" }],
     reasoning: { effort: "low" },
     input: [
-      { role: "system", content: LIVE_SEARCH_SYSTEM_PROMPT },
+      { role: "system", content: LIVE_SEARCH_SYSTEM_PROMPT + scopeClause(regionScope) },
       { role: "user", content: `Idea: ${normalizedIdea}\nCategory tags: ${categoryTags.join(", ")}${existingBlock}` },
     ],
     text: {
@@ -467,9 +494,9 @@ export interface CachePhaseResult {
   needsLiveSearch: boolean;
 }
 
-export async function runCachePhase(rawIdea: string): Promise<CachePhaseResult> {
+export async function runCachePhase(rawIdea: string, regionScope: RegionScope = null): Promise<CachePhaseResult> {
   const normalized = await normalizeIdea(rawIdea);
-  const cached = await findFreshCandidates(normalized.categoryTags, 10);
+  const cached = await findFreshCandidates(normalized.categoryTags, 10, regionScope);
 
   const base = { requestId: crypto.randomUUID(), idea: { raw: rawIdea, normalized: normalized.normalizedIdea }, categoryTags: normalized.categoryTags };
 
@@ -486,7 +513,7 @@ export async function runCachePhase(rawIdea: string): Promise<CachePhaseResult> 
     };
   }
 
-  const cacheResult = await cachedMatch(normalized.normalizedIdea, cached);
+  const cacheResult = await cachedMatch(normalized.normalizedIdea, cached, regionScope);
   return {
     ...base,
     status: cacheResult.status,
@@ -507,10 +534,20 @@ export interface LivePhaseInput {
   // rendered — always kept as-is in the final result, see
   // mergeMatches. Empty when the cache had nothing at all.
   existingMatches: VerdictMatch[];
+  // Same toggle runCachePhase already applied to the cache lookup —
+  // passed again here so the live search backfill honors the same
+  // scope instead of quietly widening it back out. See scopeClause
+  // above for exactly what it does to the search itself.
+  regionScope?: RegionScope;
 }
 
 export async function runLivePhase(input: LivePhaseInput, debug?: { upsertResult?: UpsertResult }): Promise<VerdictResponse> {
-  const live = await liveSearchAndMatch(input.normalizedIdea, input.categoryTags, input.existingMatches);
+  const live = await liveSearchAndMatch(
+    input.normalizedIdea,
+    input.categoryTags,
+    input.existingMatches,
+    input.regionScope ?? null,
+  );
 
   // Deeper research fields (business model, positioning, weaknesses,
   // etc.) are deliberately left unset here — that's Phase 3's Deep
