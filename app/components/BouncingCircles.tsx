@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { QUOTES } from "../lib/quotes";
 
 const CIRCLE_COUNT = 50; // rendered DOM element count — constant across SSR/client, see the mobile-count note below
-const MOBILE_CIRCLE_COUNT = 40; // fewer on small screens so they don't crowd the header — see seeding below
+const MOBILE_CIRCLE_COUNT = 22; // meaningfully fewer on small screens — 40 read as too crowded on an actual phone
 const MAX_SPEED = 0.5; // px/frame — "excited but not too fast"
 const MAX_TILT_SPEED = MAX_SPEED * 3; // velocity cap while device-tilt is actively pushing bodies around
 const TILT_FORCE = 0.01; // px/frame² per full-tilt (±90°) — tuned to feel responsive without being twitchy
